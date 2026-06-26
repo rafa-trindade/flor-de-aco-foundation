@@ -1,4 +1,4 @@
-![header](https://i.postimg.cc/wMXG2zgJ/fem-banner.png)
+![header](https://github.com/rafa-trindade/flor-de-aco/blob/main/docs/images/fem-banner.png?raw=true)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-c8607a?labelColor=1a0d12)](LICENSE)
 [![Kaggle](https://img.shields.io/badge/Dataset-Kaggle-e8a0b0?labelColor=7a2d45&logo=kaggle&logoColor=e8a0b0)](https://www.kaggle.com/datasets/rafatrindade/feminicidio-br)
