@@ -24,6 +24,8 @@ dbt/logs/
 *PNS_2013.txt
 *PNS_2019.txt
 *.csv
-*macro_geolocalizacao.xls
+*.xls
+*.xlsx
+
 
 latest
