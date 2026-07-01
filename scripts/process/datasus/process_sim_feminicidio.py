@@ -297,7 +297,7 @@ mapa_puerperio = {
 CURRENT_DIR  = Path(__file__).resolve().parent
 BASE_DIR     = CURRENT_DIR.parent.parent.parent
 DBC_DIR      = BASE_DIR / "data" / "landing" / "datasus" / "dbc_sim_causas_externas"
-PROCESSED_DIR = BASE_DIR / "data" / "processed"
+PROCESSED_DIR = BASE_DIR / "data" / "processed" / "datasus_sim"
 
 
 # ------------------- Pipeline principal -------------------

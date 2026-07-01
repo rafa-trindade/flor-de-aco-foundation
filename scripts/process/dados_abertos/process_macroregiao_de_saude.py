@@ -5,7 +5,7 @@ from scripts.process.dados_abertos.base_process_abertos import LANDING_DIR, PROC
 def main():
     landing_csv = LANDING_DIR / "macroregiao" / "macroregiao.csv"
     geo_path = LANDING_DIR / "macroregiao" / "macro_geolocalizacao.xls"
-    csv_final = PROCESSED_DIR / "geo_macroregiao.csv"
+    csv_final = PROCESSED_DIR / "macroregiao" / "geo_macroregiao.csv"
 
     if not landing_csv.exists() or not geo_path.exists():
         print("Erro: Arquivos base (CSV ou XLS) não encontrados na Landing.")

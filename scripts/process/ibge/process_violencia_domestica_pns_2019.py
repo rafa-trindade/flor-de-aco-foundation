@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 # ------------------- Caminhos e Diretórios -------------------
 CURRENT_DIR = Path(__file__).resolve().parent
 BASE_DIR = CURRENT_DIR.parent.parent.parent
-PROCESSED_DIR = BASE_DIR / "data" / "processed"
-LANDING_DIR = BASE_DIR / "data" / "landing"
+PROCESSED_DIR = BASE_DIR / "data" / "processed" / "ibge"
+LANDING_DIR = BASE_DIR / "data" / "processed" / "ibge" / "raw"
 
-ARQUIVO_ENTRADA = LANDING_DIR / "ibge" / "pns" / "PNS_2019.txt"
-ARQUIVO_SAIDA = PROCESSED_DIR / "pns_violencia_fem_2019.csv"
+ARQUIVO_ENTRADA = LANDING_DIR / "PNS_2019.txt"
+ARQUIVO_SAIDA = PROCESSED_DIR / "pns_violencia_dom_2019.csv"
 
 colunas_posicoes = {
     "V0001": (0, 2),
