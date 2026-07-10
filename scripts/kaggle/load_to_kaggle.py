@@ -29,6 +29,7 @@ FONTES_PARA_ENVIAR = [
     ("processed/ibge",             "*.csv",                    "ibge"),
     ("processed/ibge/raw",         "*.txt",                    "ibge/raw"),
     ("processed/macroregiao",      "*.csv",                    "macroregiao"),
+    ("processed/mjsp",             "*.csv",                    "mjsp"),
 ]
 
 
