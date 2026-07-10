@@ -92,6 +92,25 @@ Para permitir análises mais ricas e cruzamentos de informações, o projeto con
 
 ---
 
+### **7. Indicadores de Segurança Pública (Fonte: Sinesp/MJSP)**
+
+A **Secretaria Nacional de Segurança Pública (Senasp)**, vinculada ao **Ministério da Justiça e Segurança Pública (MJSP)**, consolida os indicadores nacionais de criminalidade reportados pelas Unidades da Federação através do **Sinesp VDE (Validador de Dados Estatísticos)**.
+
+**Escopo e Processamento:** É baixada a Base de Dados VDE completa (2015 até o ano corrente), disponibilizada pelo MJSP no Portal de Dados Abertos. A base cobre duas dimensões - ocorrências registradas e vítimas, por UF/ano/mês - para os indicadores atualmente publicados nesse recurso (feminicídio, entre os 28 indicadores oficiais do Sinesp VDE, ainda não consta nos arquivos públicos disponibilizados até o momento).
+
+Por esse motivo, o processamento gera dois tipos de saída:
+- Um filtro **explícito** por `Tipo Crime = Feminicídio`, que hoje retorna vazio mas está pronto para ser populado automaticamente assim que o Sinesp publicar o indicador na base pública.
+- Um **proxy declarado** de Homicídio Doloso com vítima do sexo feminino, usado como aproximação enquanto o indicador oficial não está disponível. É importante destacar que essa aproximação **não equivale a feminicídio**: feminicídio é qualificadora própria do homicídio doloso (Art. 121, §2º, VI c/c §2º-A do Código Penal, Lei 13.104/2015), condicionada a motivo de gênero comprovado (violência doméstica/familiar ou menosprezo/discriminação à condição de mulher) - mulher vítima de homicídio doloso não configura feminicídio automaticamente.
+
+**Bases disponibilizadas** (pasta `mjsp/`):
+
+- `mjsp/feminicidio_ocorrencias_uf.csv` e `mjsp/feminicidio_vitimas_uf.csv` - Filtro explícito pelo indicador oficial "Feminicídio", por UF/ano/mês. Vazio até o Sinesp publicar o dado.
+- `mjsp/mvi_feminina_vitimas_uf_proxy.csv` - Proxy de Homicídio Doloso com vítima mulher, por UF/ano/mês. **Não é o indicador oficial de feminicídio** - ver observação acima.
+
+> BRASIL. Ministério da Justiça e Segurança Pública. Secretaria Nacional de Segurança Pública. *Sinesp VDE - Validador de Dados Estatísticos*. Brasília, DF. Disponível em: <https://dados.mj.gov.br/dataset/sistema-nacional-de-estatisticas-de-seguranca-publica>.
+
+---
+
 ## 🗓️ Cobertura Histórica
 
 O repositório combina diferentes janelas temporais, de acordo com a fonte:
@@ -111,6 +130,7 @@ Nem todas as fontes têm a mesma dinâmica de atualização:
 - **SIM/DATASUS:** sincronização automatizada via FTP público do DATASUS, com reprocessamento das declarações de óbito por causas externas conforme novos arquivos são publicados.
 - **DataSenado e PNS/IBGE:** bases estáticas - cada rodada/edição é um retrato fechado no tempo, incorporada ao repositório quando o instituto responsável publica os microdados oficiais. Não há "atualização" desses dados entre uma rodada e outra, apenas a incorporação de rodadas novas quando lançadas.
 - **Macrorregiões (auxiliar):** atualizada quando o Ministério da Saúde publica revisão da malha de municípios/macrorregiões.
+- **Sinesp/MJSP:** base atualizada conforme publicação do MJSP no Portal de Dados Abertos (sem periodicidade fixa divulgada). O filtro explícito de feminicídio é reavaliado a cada execução - assim que o indicador passar a constar na base pública, os arquivos correspondentes deixam de vir vazios sem necessidade de alteração no código.
 
 Em todos os casos, a padronização de nomes de coluna, tratamento de categorias e estrutura de pastas é mantida consistente entre atualizações.
 
@@ -126,6 +146,7 @@ datasus_sim/        -> série histórica de óbitos por agressão (SIM/DATASUS)
 ibge/                -> PNS filtrada (mulheres vítimas de violência), por edição
 ibge/raw/            -> PNS bruta, microdados de posição fixa
 macroregiao/         -> base auxiliar de geolocalização/macrorregiões de saúde
+mjsp/                -> indicadores de segurança pública (Sinesp/MJSP), incl. proxy de feminicídio
 ```
 
 ---
@@ -145,6 +166,9 @@ Este dataset consolidado é disponibilizado sob licença **CC0 1.0** (domínio p
 
 - **Ministério da Saúde (base auxiliar de macrorregiões):**
   > BRASIL. Ministério da Saúde. *Dados Abertos - Macrorregião de Saúde*. Disponível em: <https://dados.gov.br>. 
+
+- **MJSP/Senasp (indicadores de segurança pública):**
+> BRASIL. Ministério da Justiça e Segurança Pública. Secretaria Nacional de Segurança Pública. *Sinesp VDE - Validador de Dados Estatísticos*. Brasília, DF. Disponível em: <https://dados.mj.gov.br/dataset/sistema-nacional-de-estatisticas-de-seguranca-publica>.
 
 Se você utilizar este dataset em pesquisas, reportagens ou análises, considere citar tanto a fonte original relevante (acima) quanto este repositório de curadoria.
 
