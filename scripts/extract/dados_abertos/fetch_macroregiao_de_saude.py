@@ -3,7 +3,7 @@ from scripts.extract.dados_abertos.base_dados_abertos import LANDING_DIR, baixar
 CSV_DIR = LANDING_DIR / "macroregiao"
 
 def main():
-    url = "https://arquivosdadosabertos.saude.gov.br/dados/dbgeral/macroregiao_de_saude.zip"
+    url = "https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/dbgeral/macroregiao_de_saude_csv.zip"
     landing_file = CSV_DIR / "macroregiao.csv"
     
     baixar_e_extrair_csv(url, landing_file)
