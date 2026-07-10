@@ -9,4 +9,5 @@ python-dotenv
 kaggle==1.7.4.5
 duckdb==1.4.3
 xlrd==2.0.1
-psycopg2-binary==2.9.7
+psycopg2-binary==2.9.7 
+openpyxl==3.1.5
