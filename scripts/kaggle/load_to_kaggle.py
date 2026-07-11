@@ -5,6 +5,8 @@ from pathlib import Path
 from datetime import datetime
 from kaggle.api.kaggle_api_extended import KaggleApi
 
+from scripts.common.paths import BASE_DIR, DATA_DIR
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -12,24 +14,21 @@ logger = logging.getLogger(__name__)
 # CONFIG
 # ======================================================================
 
-CURRENT_DIR = Path(__file__).resolve().parent
-BASE_DIR = CURRENT_DIR.parent.parent
-DATA_DIR = BASE_DIR / "data"
 KAGGLE_JSON_PATH = BASE_DIR / ".kaggle" / "kaggle.json"
 DATASET_NAME = 'feminicidio-br'
 
 # ------------------------------------------------------------------
 # FONTES
 # ------------------------------------------------------------------
-FONTES_PARA_ENVIAR = [
-    ("processed/datasen",          "pnvd_violencia_dom_*.csv", "datasen"),
-    ("processed/datasen/raw",      "pnvd_*.csv",               "datasen/raw"),
-    ("processed/datasen/raw/dict", "pnvd_dict_*.xlsx",         "datasen/dict"),
-    ("processed/datasus_sim",      "*.csv",                    "datasus_sim"),
-    ("processed/ibge",             "*.csv",                    "ibge"),
-    ("processed/ibge/raw",         "*.txt",                    "ibge/raw"),
-    ("processed/macroregiao",      "*.csv",                    "macroregiao"),
-    ("processed/mjsp",             "*.csv",                    "mjsp"),
+# Derivado do registro central em scripts/config/fontes.py -- adicionar uma
+# fonte nova não exige mais editar esta lista manualmente, só a entrada em
+# FONTES lá no registro.
+from scripts.config.fontes import FONTES
+
+FONTES_PARA_ENVIAR: list[tuple[str, str, str]] = [
+    (m.pasta_origem, m.padrao, m.pasta_kaggle)
+    for fonte in FONTES
+    for m in fonte.kaggle
 ]
 
 
