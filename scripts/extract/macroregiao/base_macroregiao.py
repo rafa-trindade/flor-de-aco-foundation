@@ -3,15 +3,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
-# -----------------------------------------
-# Gerenciamento Central de Caminhos
-# -----------------------------------------
-BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
-PROCESSED_DIR = BASE_DIR / "data" / "processed"
-LANDING_DIR = BASE_DIR / "data" / "landing"
-
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-LANDING_DIR.mkdir(parents=True, exist_ok=True)
+from scripts.common.paths import BASE_DIR, LANDING_DIR, PROCESSED_DIR  # noqa: F401
 
 # -----------------------------------------
 # Funções Utilitárias Reutilizáveis

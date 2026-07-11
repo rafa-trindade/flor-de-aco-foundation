@@ -1,6 +1,6 @@
 import pandas as pd
 import duckdb
-from scripts.process.dados_abertos.base_process_abertos import LANDING_DIR, PROCESSED_DIR, query_para_csv
+from scripts.process.macroregiao.base_process_macroregiao import LANDING_DIR, PROCESSED_DIR, query_para_csv
 
 def main():
     landing_csv = LANDING_DIR / "macroregiao" / "macroregiao.csv"

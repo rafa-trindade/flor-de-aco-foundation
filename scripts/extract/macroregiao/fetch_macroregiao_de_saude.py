@@ -1,4 +1,4 @@
-from scripts.extract.dados_abertos.base_dados_abertos import LANDING_DIR, baixar_e_extrair_csv
+from scripts.extract.macroregiao.base_macroregiao import LANDING_DIR, baixar_e_extrair_csv
 
 CSV_DIR = LANDING_DIR / "macroregiao"
 

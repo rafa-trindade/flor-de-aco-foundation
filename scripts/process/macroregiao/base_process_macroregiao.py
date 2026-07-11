@@ -1,11 +1,7 @@
 import duckdb
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
-PROCESSED_DIR = BASE_DIR / "data" / "processed"
-LANDING_DIR = BASE_DIR / "data" / "landing"
-
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+from scripts.common.paths import BASE_DIR, LANDING_DIR, PROCESSED_DIR  # noqa: F401
 
 def query_para_csv(query: str, caminho_csv: Path, con=None):
     """
