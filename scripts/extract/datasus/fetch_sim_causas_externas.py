@@ -4,8 +4,9 @@ Baixa arquivos .dbc do FTP do DATASUS (SIM - Causas Externas)
 Dados Consolidados CID-10 (desde 1996) e Dados Preliminares
 """
 from scripts.extract.datasus.base_ftp import sincronizar_ftp
+from scripts.common.paths import LANDING_DIR
 
-OUTPUT_DIR = "data/landing/datasus/dbc_sim_causas_externas"
+OUTPUT_DIR = str(LANDING_DIR / "datasus" / "dbc_sim_causas_externas")
 
 def criar_regra_doext(ano_min: int = None, ano_max: int = None):
     """Gera a regra de validação do arquivo DOEXT com base em um intervalo de anos (4 dígitos)."""
