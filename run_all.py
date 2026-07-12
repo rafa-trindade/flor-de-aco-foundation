@@ -4,14 +4,20 @@ Orquestrador do pipeline: roda extract + process de todas as fontes
 registradas em scripts/config/fontes.py, em sequência.
 
 Uso:
-    python3 run_all.py                 # roda tudo (extract + process)
-    python3 run_all.py --only mjsp     # roda só uma fonte
+    python3 run_all.py                 # roda tudo (extract + process + load, se houver novidade)
+    python3 run_all.py --only mjsp     # roda só uma fonte; load roda se ELA tiver novidade
     python3 run_all.py --process-only  # pula o extract, só reprocessa
-    python3 run_all.py --skip-manual   # (padrão) não tenta rodar fontes manuais
+    python3 run_all.py --force-load    # força load mesmo sem novidade (ex: após atualizar fonte manual)
+    python3 run_all.py --no-load       # nunca roda load_to_bucket/load_to_kaggle
 
 Fontes marcadas como `automatica=False` (DataSenado, PNS/IBGE) não têm
 extract automatizado -- este script avisa que precisam de atualização
 manual em vez de tentar rodar algo que não existe.
+
+O load (scripts/load/load_to_bucket.py + scripts/kaggle/load_to_kaggle.py)
+só roda automaticamente quando pelo menos uma fonte AUTOMÁTICA reportou
+dado novo de verdade nesta execução -- evita recriar uma versão nova no
+Kaggle toda vez que o pipeline roda sem nenhuma mudança real.
 
 CONTRATO DE 3 ESTADOS (ver scripts/common/exit_codes.py):
 Um extract pode terminar de 3 jeitos: sucesso com dado novo, sucesso sem
@@ -64,7 +70,13 @@ def _run_module(module_path: str) -> str:
         return ERRO
 
 
-def rodar_fonte(fonte: Fonte, pular_extract: bool) -> bool:
+def rodar_fonte(fonte: Fonte, pular_extract: bool) -> tuple[bool, bool]:
+    """Retorna (ok, teve_novidade_confiavel).
+
+    teve_novidade_confiavel só é True quando um extract automático
+    reportou SUCESSO de verdade (dado novo). Fontes manuais ou rodadas
+    com --process-only não contam pra essa flag -- não tem como saber se
+    o dado bruto mudou sem um extract rodando."""
     print(f"\n{'=' * 70}\n{fonte.nome} ({fonte.id})\n{'=' * 70}")
 
     if not fonte.automatica:
@@ -76,12 +88,14 @@ def rodar_fonte(fonte: Fonte, pular_extract: bool) -> bool:
         print(f"  Nota: {fonte.nota}")
 
     houve_erro = False
-    houve_novidade = True  # default: roda o process (fonte manual ou extract pulado com --process-only)
+    houve_novidade = True       # default: roda o process (fonte manual ou extract pulado)
+    novidade_confiavel = False  # só True quando um extract automático confirmou
 
     if fonte.automatica and not pular_extract:
         resultados = [_run_module(mod) for mod in fonte.extract_modules]
         houve_erro = ERRO in resultados
         houve_novidade = any(r == SUCESSO for r in resultados)
+        novidade_confiavel = houve_novidade
 
     if houve_erro:
         print(f"[PULADO] process não roda -- extract falhou.")
@@ -94,13 +108,30 @@ def rodar_fonte(fonte: Fonte, pular_extract: bool) -> bool:
 
     ok = not houve_erro
     print(f"{'OK' if ok else 'COM FALHAS'}: {fonte.id}")
-    return ok
+    return ok, novidade_confiavel
+
+
+LOAD_MODULES = [
+    "scripts.load.load_to_bucket",
+    "scripts.kaggle.load_to_kaggle",
+]
 
 
 def main():
     parser = argparse.ArgumentParser(description="Orquestrador do pipeline flor-de-aco-foundation")
     parser.add_argument("--only", help="Roda só a fonte com este id (ver scripts/config/fontes.py)")
     parser.add_argument("--process-only", action="store_true", help="Pula o extract, roda só o process")
+    parser.add_argument(
+        "--force-load",
+        action="store_true",
+        help="Roda load_to_bucket/load_to_kaggle mesmo sem novidade detectada "
+             "(útil depois de atualizar uma fonte manual, ex: DataSenado)",
+    )
+    parser.add_argument(
+        "--no-load",
+        action="store_true",
+        help="Nunca roda load_to_bucket/load_to_kaggle, mesmo com novidade",
+    )
     args = parser.parse_args()
 
     alvo = [f for f in FONTES if f.id == args.only] if args.only else FONTES
@@ -111,10 +142,29 @@ def main():
     resultados = {f.id: rodar_fonte(f, pular_extract=args.process_only) for f in alvo}
 
     print(f"\n{'=' * 70}\nResumo\n{'=' * 70}")
-    for id_fonte, ok in resultados.items():
+    for id_fonte, (ok, _) in resultados.items():
         print(f"  {'✔' if ok else '✘'} {id_fonte}")
 
-    if not all(resultados.values()):
+    sucesso_geral = all(ok for ok, _ in resultados.values())
+    houve_mudanca_real = any(novidade for _, novidade in resultados.values())
+
+    if args.no_load:
+        print("\n[LOAD] Pulado (--no-load).")
+    elif not sucesso_geral:
+        print("\n[LOAD] Pulado -- pelo menos uma fonte falhou, não publica dado possivelmente incompleto.")
+    elif not (houve_mudanca_real or args.force_load):
+        print(
+            "\n[LOAD] Pulado -- nenhuma fonte automática reportou dado novo nesta execução. "
+            "Se você atualizou uma fonte manual (DataSenado, PNS/IBGE), rode de novo com --force-load."
+        )
+    else:
+        print(f"\n{'=' * 70}\nLoad (bucket + Kaggle)\n{'=' * 70}")
+        for mod in LOAD_MODULES:
+            resultado = _run_module(mod)
+            if resultado == ERRO:
+                sucesso_geral = False
+
+    if not sucesso_geral:
         sys.exit(1)
 
 

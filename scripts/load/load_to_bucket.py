@@ -5,16 +5,14 @@ import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
 from dotenv import load_dotenv
 
+from scripts.common import exit_codes
+from scripts.common.paths import BASE_DIR, PROCESSED_DIR
+
 # -----------------------------
 # Logging
 # -----------------------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# ------------------- Caminhos e Diretórios -------------------
-CURRENT_DIR = Path(__file__).resolve().parent
-BASE_DIR = CURRENT_DIR.parent.parent
-PROCESSED_DIR = BASE_DIR / "data" / "processed"
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -112,4 +110,4 @@ def main() -> bool:
 
 if __name__ == "__main__":
     updated = main()
-    exit(0 if updated else 1)
+    exit(exit_codes.SUCESSO if updated else exit_codes.SEM_NOVIDADE)
