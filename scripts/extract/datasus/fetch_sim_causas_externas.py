@@ -5,6 +5,7 @@ Dados Consolidados CID-10 (desde 1996) e Dados Preliminares
 """
 from scripts.extract.datasus.base_ftp import sincronizar_ftp
 from scripts.common.paths import LANDING_DIR
+from scripts.common import exit_codes
 
 OUTPUT_DIR = str(LANDING_DIR / "datasus" / "dbc_sim_causas_externas")
 
@@ -47,13 +48,20 @@ FONTES_FTP = [
 ]
 
 if __name__ == "__main__":
-    houve_atualizacao = False
-    
+    sucesso_geral = True
+    houve_novidade = False
+
     for fonte in FONTES_FTP:
         print(f"Sincronizando dados {fonte['tipo']} do diretório: {fonte['diretorio']}")
-        
-        updated = sincronizar_ftp(fonte["diretorio"], OUTPUT_DIR, fonte["regra"])
-        if updated:
-            houve_atualizacao = True
 
-    exit(0 if houve_atualizacao else 1)
+        sucesso, novidade = sincronizar_ftp(fonte["diretorio"], OUTPUT_DIR, fonte["regra"])
+        sucesso_geral = sucesso_geral and sucesso
+        houve_novidade = houve_novidade or novidade
+
+    if not sucesso_geral:
+        exit(exit_codes.ERRO)
+    elif not houve_novidade:
+        print("[INFO] Nenhum arquivo novo desde a última execução -- process será pulado pelo run_all.py.")
+        exit(exit_codes.SEM_NOVIDADE)
+    else:
+        exit(exit_codes.SUCESSO)

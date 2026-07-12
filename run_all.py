@@ -12,29 +12,56 @@ Uso:
 Fontes marcadas como `automatica=False` (DataSenado, PNS/IBGE) não têm
 extract automatizado -- este script avisa que precisam de atualização
 manual em vez de tentar rodar algo que não existe.
+
+CONTRATO DE 3 ESTADOS (ver scripts/common/exit_codes.py):
+Um extract pode terminar de 3 jeitos: sucesso com dado novo, sucesso sem
+nada de novo, ou erro. O process só roda no primeiro caso -- não faz
+sentido reprocessar (às vezes caro, como a conversão .dbc -> parquet do
+SIM) quando nada mudou desde a última execução. Scripts que não usam
+scripts.common.exit_codes (ex: macroregiao, mjsp) são tratados como
+"sempre com novidade" por padrão -- comportamento igual ao de antes.
 """
 import argparse
-import importlib
+import runpy
 import sys
 import traceback
 
 from scripts.config.fontes import FONTES, Fonte
+from scripts.common import exit_codes
+
+SUCESSO, SEM_NOVIDADE, ERRO = "sucesso", "sem_novidade", "erro"
 
 
-def _run_module(module_path: str) -> bool:
-    """Importa um módulo e chama seu main(), se existir."""
+def _run_module(module_path: str) -> str:
+    """
+    Executa um módulo exatamente como `python -m module_path` executaria --
+    via runpy, com run_name="__main__". Isso garante que o bloco
+    `if __name__ == "__main__":` do script rode de verdade, independente de
+    o script expor uma função main() ou só ter código solto nesse bloco
+    (a maioria dos scripts do projeto é do segundo tipo).
+
+    Retorna SUCESSO, SEM_NOVIDADE ou ERRO -- lido do exit code do script,
+    se ele usar scripts.common.exit_codes; senão assume SUCESSO (mesmo
+    comportamento de antes, pra não quebrar scripts que não adotaram o
+    contrato de 3 estados ainda).
+    """
     print(f"  -> {module_path}")
     try:
-        mod = importlib.import_module(module_path)
-        if hasattr(mod, "main"):
-            mod.main()
-        # Scripts que só rodam via `if __name__ == "__main__"` (sem função
-        # main() exposta) já executam no import -- nada a mais a fazer aqui.
-        return True
+        runpy.run_module(module_path, run_name="__main__")
+        return SUCESSO
+    except SystemExit as e:
+        codigo = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+        if codigo == exit_codes.SUCESSO:
+            return SUCESSO
+        elif codigo == exit_codes.SEM_NOVIDADE:
+            return SEM_NOVIDADE
+        else:
+            print(f"  [ERRO] {module_path} terminou com exit code {codigo}")
+            return ERRO
     except Exception:
         print(f"  [ERRO] Falha em {module_path}:")
         traceback.print_exc()
-        return False
+        return ERRO
 
 
 def rodar_fonte(fonte: Fonte, pular_extract: bool) -> bool:
@@ -48,15 +75,24 @@ def rodar_fonte(fonte: Fonte, pular_extract: bool) -> bool:
     elif fonte.nota:
         print(f"  Nota: {fonte.nota}")
 
-    ok = True
+    houve_erro = False
+    houve_novidade = True  # default: roda o process (fonte manual ou extract pulado com --process-only)
 
     if fonte.automatica and not pular_extract:
-        for mod in fonte.extract_modules:
-            ok = _run_module(mod) and ok
+        resultados = [_run_module(mod) for mod in fonte.extract_modules]
+        houve_erro = ERRO in resultados
+        houve_novidade = any(r == SUCESSO for r in resultados)
 
-    for mod in fonte.process_modules:
-        ok = _run_module(mod) and ok
+    if houve_erro:
+        print(f"[PULADO] process não roda -- extract falhou.")
+    elif not houve_novidade:
+        print(f"[PULADO] process não roda -- nenhum dado novo desde a última execução.")
+    else:
+        for mod in fonte.process_modules:
+            if _run_module(mod) == ERRO:
+                houve_erro = True
 
+    ok = not houve_erro
     print(f"{'OK' if ok else 'COM FALHAS'}: {fonte.id}")
     return ok
 

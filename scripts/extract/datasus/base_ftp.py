@@ -51,7 +51,10 @@ def _backoff(attempt: int):
     logger.info(f"Aguardando {espera:.1f}s antes de tentar de novo...")
     time.sleep(espera)
 
-def baixar_arquivo(ftp_dir: str, nome_arquivo: str, pasta_saida: str) -> bool:
+def baixar_arquivo(ftp_dir: str, nome_arquivo: str, pasta_saida: str) -> tuple[bool, bool]:
+    """Retorna (sucesso, houve_novidade). houve_novidade é False quando o
+    arquivo já estava completo localmente (SKIP) -- só True quando algo
+    foi de fato baixado/retomado agora."""
     local_path = os.path.join(pasta_saida, nome_arquivo)
     tamanho_ftp = None
 
@@ -72,13 +75,13 @@ def baixar_arquivo(ftp_dir: str, nome_arquivo: str, pasta_saida: str) -> bool:
                     if attempt < MAX_RETRIES - 1:
                         _backoff(attempt)
                         continue
-                    return False
+                    return False, False
                 
                 tamanho_local = os.path.getsize(local_path) if os.path.exists(local_path) else 0
                 
                 if tamanho_local >= tamanho_ftp:
                     print(f"[SKIP] {nome_arquivo} (Completo: {tamanho_local} bytes)")
-                    return True 
+                    return True, False
                 
                 rest_pos = tamanho_local if tamanho_local > 0 else None
                 modo_abertura = "ab" if tamanho_local > 0 else "wb"
@@ -94,7 +97,7 @@ def baixar_arquivo(ftp_dir: str, nome_arquivo: str, pasta_saida: str) -> bool:
                 
                 if os.path.getsize(local_path) == tamanho_ftp:
                     print(f"[OK] {nome_arquivo} concluído.")
-                    return True
+                    return True, True
                 else:
                     raise Exception("Download interrompido (tamanho incompleto)")
                 
@@ -106,12 +109,13 @@ def baixar_arquivo(ftp_dir: str, nome_arquivo: str, pasta_saida: str) -> bool:
                 print(f"[FATAL] Desistindo de {nome_arquivo} após {MAX_RETRIES} tentativas.")
                 if os.path.exists(local_path) and os.path.getsize(local_path) < (tamanho_ftp or 0):
                     os.remove(local_path)
-                return False
+                return False, False
+    return False, False
 
-def sincronizar_ftp(ftp_dir: str, output_dir: str, regra_filtro: Callable[[str], bool]) -> bool:
+def sincronizar_ftp(ftp_dir: str, output_dir: str, regra_filtro: Callable[[str], bool]) -> tuple[bool, bool]:
+    """Retorna (sucesso, houve_novidade)."""
     ensure_output_dir(output_dir)
     logger.info(f"Conectando a {FTP_HOST} ({ftp_dir}) para listar arquivos...")
-    arquivos_baixados = False
     relevantes = []
 
     for attempt in range(MAX_RETRIES):
@@ -128,7 +132,7 @@ def sincronizar_ftp(ftp_dir: str, output_dir: str, regra_filtro: Callable[[str],
                 
                 if not arquivos:
                     print("Nenhum arquivo encontrado no diretório.")
-                    return False
+                    return True, False  # diretório vazio não é erro, só não tem novidade
                     
                 relevantes = [arq for arq in arquivos if regra_filtro(arq)]
                 print(f"Sucesso ao listar! {len(relevantes)} arquivos passaram no filtro.")
@@ -138,16 +142,19 @@ def sincronizar_ftp(ftp_dir: str, output_dir: str, regra_filtro: Callable[[str],
             logger.error(f"Falha ao listar diretório (Tentativa {attempt + 1}): {type(e).__name__}: {e}")
             if attempt == MAX_RETRIES - 1:
                 print("[FATAL] Não foi possível listar os arquivos do FTP.")
-                return False
+                return False, False
             _backoff(attempt)
 
+    sucesso_geral = True
+    houve_novidade = False
     for arq in relevantes:
-        if baixar_arquivo(ftp_dir, arq, output_dir):
-            arquivos_baixados = True
+        sucesso, novidade = baixar_arquivo(ftp_dir, arq, output_dir)
+        sucesso_geral = sucesso_geral and sucesso
+        houve_novidade = houve_novidade or novidade
 
-    if arquivos_baixados:
+    if houve_novidade:
         print("[INFO] Sincronização concluída com novos arquivos.")
     else:
         print("[INFO] Sincronização concluída. Nenhuma atualização necessária.")
         
-    return arquivos_baixados
+    return sucesso_geral, houve_novidade
