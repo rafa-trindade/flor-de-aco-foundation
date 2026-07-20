@@ -1,43 +1,28 @@
-"""
-Registro central de todas as fontes de dados do pipeline.
+"""Registro central das fontes do pipeline.
 
-Antes desse arquivo, adicionar uma fonte nova exigia editar separadamente:
-  1. scripts/extract/<fonte>/...          (o fetch em si)
-  2. scripts/process/<fonte>/...          (o process em si)
-  3. scripts/kaggle/load_to_kaggle.py      (FONTES_PARA_ENVIAR)
-  4. docs/referencias.md e dicionario_variaveis.md (manual, fora do código)
+Um lugar só define, para cada fonte: os módulos de extract/process, se
+tem fetch automatizado, e em qual pasta do bucket ela publica. run_all.py
+e o load para o Kaggle leem daqui.
 
-Itens 1 e 2 continuam sendo o código de cada fonte. Este arquivo existe
-para que os itens 3 (e o orquestrador run_all.py) leiam a partir de UM
-registro só, em vez de listas duplicadas e que podem ficar dessincronizadas.
+pasta_bucket é a chave do modelo streaming: é onde o Parquet final é
+publicado e onde fica o _manifest.json que controla o incremental. Os
+scripts de extract/process precisam usar exatamente esse mesmo valor.
 
-Para adicionar uma fonte nova:
-  1. Escreva o extract/process normalmente, seguindo o padrão das
-     fontes existentes (base_<fonte>.py + script(s) específico(s)).
-  2. Adicione uma entrada em FONTES abaixo.
-  3. Pronto -- load_to_kaggle.py e run_all.py já pegam automaticamente.
+Para adicionar uma fonte:
+  1. Escreva o extract/process seguindo o padrão das existentes.
+  2. Registre aqui.
 """
 from dataclasses import dataclass, field
-
-
-@dataclass(frozen=True)
-class KaggleMapping:
-    """Uma pasta de `data/processed/` a ser enviada ao Kaggle."""
-    pasta_origem: str   # relativo a data/, ex: "processed/mjsp"
-    padrao: str          # glob, ex: "*.csv"
-    pasta_kaggle: str    # subpasta de destino dentro do dataset no Kaggle
 
 
 @dataclass(frozen=True)
 class Fonte:
     id: str
     nome: str
+    pasta_bucket: str
     automatica: bool
-    # módulos Python executáveis (têm `main()` ou rodam via `if __name__`),
-    # na ordem em que devem ser chamados
     extract_modules: list[str] = field(default_factory=list)
     process_modules: list[str] = field(default_factory=list)
-    kaggle: list[KaggleMapping] = field(default_factory=list)
     nota: str = ""
 
 
@@ -45,70 +30,55 @@ FONTES: list[Fonte] = [
     Fonte(
         id="macroregiao",
         nome="Macrorregião e Região de Saúde (Ministério da Saúde)",
+        pasta_bucket="macroregiao",
         automatica=True,
         extract_modules=["scripts.extract.macroregiao.fetch_macroregiao_de_saude"],
         process_modules=["scripts.process.macroregiao.process_macroregiao_de_saude"],
-        kaggle=[
-            KaggleMapping("processed/macroregiao", "*.csv", "macroregiao"),
-        ],
+        nota="Precisa de macro_geolocalizacao.xls em MANUAL_DIR/macroregiao/.",
     ),
     Fonte(
         id="datasus_sim",
-        nome="SIM/DATASUS (óbitos femininos por causas externas)",
+        nome="SIM/DATASUS -- óbitos femininos por agressão (CID-10 X85-Y09)",
+        pasta_bucket="datasus_sim",
         automatica=True,
         extract_modules=["scripts.extract.datasus.fetch_sim_causas_externas"],
         process_modules=["scripts.process.datasus.process_sim_feminicidio"],
-        kaggle=[
-            KaggleMapping("processed/datasus_sim", "*.csv", "datasus_sim"),
-        ],
         nota=(
-            "Extract via FTP -- pode falhar em VPS/cloud com a porta 21 "
-            "bloqueada perto do destino (ver CHANGELOG). Nesses casos, "
-            "rodar o extract localmente (Windows) e sincronizar os .dbc "
-            "para data/landing/datasus/ manualmente antes do process."
+            "Extract via FTP -- pode falhar em VPS com porta 21 bloqueada. "
+            "Nesse caso use SOCKS5_PROXY_ENABLED=true (ver base_ftp.py) ou "
+            "rode o extract localmente."
         ),
     ),
     Fonte(
         id="mjsp",
-        nome="Sinesp/MJSP (feminicídio explícito + proxy de MVI feminina)",
+        nome="Sinesp/MJSP -- feminicídio explícito e MVI feminina",
+        pasta_bucket="mjsp",
         automatica=True,
         extract_modules=["scripts.extract.mjsp.fetch_sinesp_seguranca_publica"],
         process_modules=["scripts.process.mjsp.process_sinesp_feminicidio"],
-        kaggle=[
-            KaggleMapping("processed/mjsp", "*.csv", "mjsp"),
-        ],
-        nota="feminicidio_*.csv ficam vazios até o Sinesp publicar o indicador.",
+        nota="Indicador de feminicídio fica vazio até o Sinesp publicá-lo.",
     ),
     Fonte(
         id="ibge_pns",
-        nome="PNS/IBGE (mulheres vítimas de violência, 2013 e 2019)",
+        nome="PNS/IBGE -- mulheres vítimas de violência (2013 e 2019)",
+        pasta_bucket="ibge",
         automatica=False,
         process_modules=[
             "scripts.process.ibge.process_violencia_domestica_pns_2013",
             "scripts.process.ibge.process_violencia_domestica_pns_2019",
         ],
-        kaggle=[
-            KaggleMapping("processed/ibge", "*.csv", "ibge"),
-            KaggleMapping("processed/ibge/raw", "*.txt", "ibge/raw"),
-        ],
-        nota="Microdados de posição fixa baixados manualmente do site do IBGE.",
+        nota="Microdados de posição fixa em MANUAL_DIR/ibge/pns/ (PNS_2013.txt, PNS_2019.txt).",
     ),
     Fonte(
         id="datasen",
-        nome="DataSenado (Pesquisa Violência Doméstica e Familiar, PNVD)",
+        nome="DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD)",
+        pasta_bucket="datasen",
         automatica=False,
         process_modules=["scripts.process.datasen.process_violencia_domestica_pnvd"],
-        kaggle=[
-            KaggleMapping("processed/datasen", "pnvd_violencia_dom_*.csv", "datasen"),
-            KaggleMapping("processed/datasen/raw", "pnvd_*.csv", "datasen/raw"),
-            KaggleMapping("processed/datasen/raw/dict", "pnvd_dict_*.xlsx", "datasen/dict"),
-        ],
         nota=(
-            "Sem fetch automatizado por decisão de projeto: rodadas bienais, "
-            "baixo volume de atualização, e a página oficial é uma SPA sem "
-            "endpoint de download estático fácil de automatizar. Baixar "
-            "manualmente em https://www.senado.leg.br/institucional/datasenado/"
-            "paineis_dados/#/dados-abertos e salvar em data/processed/datasen/raw/."
+            "Sem fetch automatizado: rodadas bienais e a página oficial é SPA "
+            "sem endpoint estático. Baixar de senado.leg.br/institucional/"
+            "datasenado/paineis_dados/#/dados-abertos para MANUAL_DIR/datasen/."
         ),
     ),
 ]
@@ -119,3 +89,12 @@ def get_fonte(id: str) -> Fonte:
         if f.id == id:
             return f
     raise KeyError(f"Fonte '{id}' não registrada em scripts/config/fontes.py")
+
+
+def pastas_bucket() -> list[str]:
+    """Pastas distintas do bucket, na ordem de registro."""
+    vistas = []
+    for f in FONTES:
+        if f.pasta_bucket not in vistas:
+            vistas.append(f.pasta_bucket)
+    return vistas

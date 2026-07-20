@@ -9,6 +9,10 @@ from scripts.common import exit_codes
 
 OUTPUT_DIR = str(LANDING_DIR / "datasus" / "dbc_sim_causas_externas")
 
+# Mesma pasta usada por process_sim_feminicidio.py -- é onde fica o
+# _manifest.json que diz o que já foi incorporado ao Parquet publicado.
+PASTA_BUCKET = "datasus_sim"
+
 def criar_regra_doext(ano_min: int = None, ano_max: int = None):
     """Gera a regra de validação do arquivo DOEXT com base em um intervalo de anos (4 dígitos)."""
     def regra(nome_arquivo: str) -> bool:
@@ -54,7 +58,9 @@ if __name__ == "__main__":
     for fonte in FONTES_FTP:
         print(f"Sincronizando dados {fonte['tipo']} do diretório: {fonte['diretorio']}")
 
-        sucesso, novidade = sincronizar_ftp(fonte["diretorio"], OUTPUT_DIR, fonte["regra"])
+        sucesso, novidade = sincronizar_ftp(
+            fonte["diretorio"], OUTPUT_DIR, fonte["regra"], pasta_bucket=PASTA_BUCKET
+        )
         sucesso_geral = sucesso_geral and sucesso
         houve_novidade = houve_novidade or novidade
 
