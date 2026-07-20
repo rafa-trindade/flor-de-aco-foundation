@@ -33,7 +33,7 @@ FONTES: list[Fonte] = [
         pasta_bucket="datasus_sim",
         automatica=True,
         extract_modules=["scripts.extract.datasus.fetch_sim_causas_externas"],
-        process_modules=["scripts.process.datasus.process_sim_feminicidio"],
+        process_modules=["scripts.process.datasus.process_proxy_sim_feminicidio"],
         nota=(
             "Extract via FTP -- pode falhar em VPS com porta 21 bloqueada. "
             "Nesse caso use SOCKS5_PROXY_ENABLED=true (ver base_ftp.py) ou "
@@ -46,17 +46,22 @@ FONTES: list[Fonte] = [
         pasta_bucket="ibge",
         automatica=False,
         process_modules=[
-            "scripts.process.ibge.process_violencia_domestica_pns_2013",
-            "scripts.process.ibge.process_violencia_domestica_pns_2019",
+            "scripts.process.ibge.process_pns_violencia_2013",
+            "scripts.process.ibge.process_pns_violencia_domestica_2019",
         ],
-        nota="Microdados de posição fixa em MANUAL_DIR/ibge/pns/ (PNS_2013.txt, PNS_2019.txt).",
+        nota=(
+            "Microdados de posição fixa em MANUAL_DIR/ibge/pns/. 2013 publica duas "
+            "bases (violência por pessoa conhecida e por desconhecida, blocos "
+            "distintos no questionário); 2019 publica uma, com o agressor por "
+            "tipo de violência."
+        ),
     ),
     Fonte(
         id="datasen",
         nome="DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD)",
         pasta_bucket="datasen",
         automatica=False,
-        process_modules=["scripts.process.datasen.process_violencia_domestica_pnvd"],
+        process_modules=["scripts.process.datasen.process_pn_violencia_domestica"],
         nota=(
             "Sem fetch automatizado: rodadas bienais e a página oficial é SPA "
             "sem endpoint estático. Baixar de senado.leg.br/institucional/"

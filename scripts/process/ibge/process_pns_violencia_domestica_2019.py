@@ -1,308 +1,350 @@
-"""PNS/IBGE 2019 -- mulheres que declararam ter sofrido violência.
+"""PNS/IBGE 2019 -- módulo de violência (bloco V).
+
+Posições, nomes e domínios extraídos do dicionário oficial
+(dicionario_pns_microdados_2019.xls).
+
+Estrutura diferente de 2013: em vez de separar violência por pessoa
+conhecida/desconhecida, 2019 pergunta por ato (psicológica, física,
+sexual) e identifica o agressor em cada bloco -- inclusive "Pessoa
+desconhecida" e "Policial". Por isso uma base só, com o agressor como
+coluna.
+
+2019 também pergunta violência sexual ALGUMA VEZ NA VIDA, além dos
+últimos 12 meses.
 
 Microdados de posição fixa em MANUAL_DIR (ver env.example).
-Recorte: Sexo = Feminino e "Sim" em qualquer das perguntas de violência
--- em 2019 o questionário passou a detalhar os tipos em colunas
-separadas, no lugar da pergunta única de 2013.
 """
 import sys
+
+import pandas as pd
 
 from scripts.common.paths import MANUAL_PNS_DIR
 from scripts.process.ibge.base_process_pns import processar_pns
 
 PASTA_BUCKET = "ibge"
 ARQUIVO = MANUAL_PNS_DIR / "PNS_2019.txt"
-NOME_SAIDA = "pns_violencia_domestica_2019.parquet"
+SAIDA = "pns_violencia_domestica_2019.parquet"
 
 COLUNAS_VIOLENCIA = [
-    "Ofensa/humilhação em público (12 meses)",
-    "Gritos/xingamentos (12 meses)",
-    "Ameaças/redes sociais (12 meses)",
-    "Ameaça contra pessoa importante (12 meses)",
-    "Destruiu algo seu (12 meses)",
-    "Agressão física: tapa/bofetada",
-    "Agressão física: empurrão/segurar/jogar objeto",
-    "Agressão física: soco/chute/puxão de cabelo",
-    "Agressão física: estrangular/asfixiar/queimar",
-    "Agressão física com arma (faca, arma de fogo)",
-    "Violência sexual (12 meses): toque/beijo/manipulação",
-    "Violência sexual (12 meses): ameaça/forçar ato sexual",
+    "psi_humilhacao_publica", "psi_gritos", "psi_ameaca_digital",
+    "psi_ameaca_terceiro", "psi_destruiu_bem",
+    "fis_tapa", "fis_empurrao", "fis_soco_chute", "fis_estrangulamento", "fis_arma",
+    "sex_toque_forcado_12m", "sex_relacao_forcada_12m",
+    "sex_toque_forcado_vida", "sex_relacao_forcada_vida",
 ]
 
-colunas_posicoes = {
-    "V0001": (0, 2),
-    "V0026": (30, 31),        
-    "C006":  (107, 108),      
-    "C008":  (116, 119),      
-    "C009":  (119, 120),      
-    "V00201": (1247, 1248), 
-    "V00202": (1248, 1249),   
-    "V00203": (1249, 1250), 
-    "V00204": (1250, 1251),  
-    "V00205": (1251, 1252),  
-    "V003":   (1252, 1253),  
-    "V006":   (1253, 1255),  
-    "V007":   (1255, 1256),  
-    "V01401": (1256, 1257),  
-    "V01402": (1257, 1258),  
-    "V01403": (1258, 1259),  
-    "V01404": (1259, 1260),  
-    "V01405": (1260, 1261),  
-    "V015":   (1261, 1262),  
-    "V018":   (1262, 1264),  
-    "V019":   (1264, 1265),  
-    "V02701": (1265, 1266),  
-    "V02702": (1266, 1267),   
-    "V02801": (1267, 1268),  
-    "V02802": (1268, 1269),   
-    "V029":   (1269, 1270), 
-    "V032":   (1270, 1272), 
-    "V033":   (1272, 1273),  
-    "V034":   (1273, 1274), 
-    "V03501": (1274, 1275), 
-    "V03502": (1275, 1276), 
-    "V03503": (1276, 1277), 
-    "V036":   (1277, 1278), 
-    "V037":   (1278, 1279), 
-    "V038":   (1279, 1281), 
-    "V039":   (1281, 1282)
+COLUNAS_AGRESSOR = ["psi_agressor", "fis_agressor", "sex_agressor"]
+
+AGRESSOR_PARCEIRO_INTIMO = {
+    "Cônjuge ou companheiro (a)",
+    "Ex-Cônjuge ou ex-companheiro (a)",
+    "Parceiro (a), namorado (a), ex-parceiro (a), ex-namorado (a)",
+    "Parceiro (a), namorado (a), ex-parceiro (a), ex-namorado (a",
 }
 
-colunas_nomes = {
-    "V0001": "Unidade da Federação",
-    "V0026": "Área",
-    "C006": "Sexo",
-    "C008": "Idade",
-    "C009": "Cor ou raça",
-    "V00201": "Ofensa/humilhação em público (12 meses)",
-    "V00202": "Gritos/xingamentos (12 meses)",
-    "V00203": "Ameaças/redes sociais (12 meses)",
-    "V00204": "Ameaça contra pessoa importante (12 meses)",
-    "V00205": "Destruiu algo seu (12 meses)",
-    "V003":   "Frequência da violência psicológica",
-    "V006":   "Autor da violência psicológica",
-    "V007":   "Local da violência psicológica",
-    "V01401": "Agressão física: tapa/bofetada",
-    "V01402": "Agressão física: empurrão/segurar/jogar objeto",
-    "V01403": "Agressão física: soco/chute/puxão de cabelo",
-    "V01404": "Agressão física: estrangular/asfixiar/queimar",
-    "V01405": "Agressão física com arma (faca, arma de fogo)",
-    "V015":   "Frequência da agressão física",
-    "V018": "Autor da agressão física",
-    "V019": "Local da agressão física",
-    "V02701": "Violência sexual (12 meses): toque/beijo/manipulação",
-    "V02702": "Violência sexual (12 meses): ameaça/forçar ato sexual",
-    "V02801": "Violência sexual na vida: toque/beijo/manipulação",
-    "V02802": "Violência sexual na vida: ameaça/forçar ato sexual",
-    "V029":  "Frequência da violência sexual",
-    "V032":  "Autor da violência sexual",
-    "V033":  "Local da violência sexual",
-    "V034":  "Deixou de realizar atividades por causa da violência sexual",
-    "V03501": "Consequência física por ato sexual forçado",
-    "V03502": "Consequência psicológica por ato sexual forçado",
-    "V03503": "DST ou gravidez por ato sexual forçado",
-    "V036": "Buscou atendimento de saúde",
-    "V037": "Recebeu atendimento de saúde",
-    "V038": "Local do atendimento de saúde",
-    "V039": "Internação por 24h ou mais",
+POSICOES = {
+    'V0001': (0, 2),
+    'V0024': (2, 9),
+    'UPA_PNS': (9, 18),
+    'V0006_PNS': (18, 22),
+    'V0026': (30, 31),
+    'C006': (107, 108),
+    'C008': (116, 119),
+    'C009': (119, 120),
+    'V001': (1245, 1246),
+    'V00201': (1247, 1248),
+    'V00202': (1248, 1249),
+    'V00203': (1249, 1250),
+    'V00204': (1250, 1251),
+    'V00205': (1251, 1252),
+    'V003': (1252, 1253),
+    'V006': (1253, 1255),
+    'V007': (1255, 1256),
+    'V01401': (1256, 1257),
+    'V01402': (1257, 1258),
+    'V01403': (1258, 1259),
+    'V01404': (1259, 1260),
+    'V01405': (1260, 1261),
+    'V015': (1261, 1262),
+    'V018': (1262, 1264),
+    'V019': (1264, 1265),
+    'V02701': (1265, 1266),
+    'V02702': (1266, 1267),
+    'V02801': (1267, 1268),
+    'V02802': (1268, 1269),
+    'V029': (1269, 1270),
+    'V032': (1270, 1272),
+    'V033': (1272, 1273),
+    'V034': (1273, 1274),
+    'V00291': (1425, 1439),
 }
 
-mapeamentos = {
-    "V0001": {
-        "11": "Rondônia",
-        "12": "Acre",
-        "13": "Amazonas",
-        "14": "Roraima",
-        "15": "Pará",
-        "16": "Amapá",
-        "17": "Tocantins",
-        "21": "Maranhão",
-        "22": "Piauí",
-        "23": "Ceará",
-        "24": "Rio Grande do Norte",
-        "25": "Paraíba",
-        "26": "Pernambuco",
-        "27": "Alagoas",
-        "28": "Sergipe",
-        "29": "Bahia",
-        "31": "Minas Gerais",
-        "32": "Espírito Santo",
-        "33": "Rio de Janeiro",
-        "35": "São Paulo",
-        "41": "Paraná",
-        "42": "Santa Catarina",
-        "43": "Rio Grande do Sul",
-        "50": "Mato Grosso do Sul",
-        "51": "Mato Grosso",
-        "52": "Goiás",
-        "53": "Distrito Federal",
-        "": "Não aplicável"
-    },
-    "V0026": {"1": "Urbano", "2": "Rural", "": "Não aplicável"},
-    "C006": {
-        "1": "Masculino",
-        "2": "Feminino",
-        "": "Não aplicável"
-    },
-    "C008": {
-        "": "Não aplicável"
-    },
-    "C009": {
-        "1": "Branca",
-        "2": "Preta",
-        "3": "Amarela",
-        "4": "Parda",
-        "5": "Indígena",
-        "9": "Ignorado",
-        "": "Não aplicável"
-    },
-    "V00201": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V00202": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V00203": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V00204": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V00205": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-
-    "V003": {
-        "1": "Muitas vezes",
-        "2": "Algumas vezes",
-        "3": "Uma vez",
-        "": "Não aplicável"
-    },
-    "V006": {
-        "01": "Cônjuge/companheiro(a)",
-        "02": "Ex-cônjuge/companheiro(a)",
-        "03": "Namorado(a)/ex",
-        "04": "Pai/mãe/padrasto/madrasta",
-        "05": "Filho(a)/enteado(a)",
-        "06": "Irmão(ã)",
-        "07": "Outro parente",
-        "08": "Amigo/colega/vizinho",
-        "09": "Empregado(a)",
-        "10": "Patrão/chefe",
-        "11": "Pessoa desconhecida",
-        "12": "Policial",
-        "13": "Outro",
-        "": "Não aplicável"
-    },
-    "V007": {
-        "1": "Residência",
-        "2": "Trabalho",
-        "3": "Estudo",
-        "4": "Bar/restaurante",
-        "5": "Via pública",
-        "6": "Internet/Redes sociais",
-        "7": "Outro",
-        "": "Não aplicável"
-    },
-    "V01401": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V01402": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V01403": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V01404": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V01405": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-
-    "V015": {"1": "Muitas vezes", "2": "Algumas vezes", "3": "Uma vez", "": "Não aplicável"},
-
-    "V018": { 
-        "01": "Cônjuge/companheiro(a)",
-        "02": "Ex-cônjuge/companheiro(a)",
-        "03": "Namorado(a)/ex",
-        "04": "Pai/mãe/padrasto/madrasta",
-        "05": "Filho(a)/enteado(a)",
-        "06": "Irmão(ã)",
-        "07": "Outro parente",
-        "08": "Amigo/colega/vizinho",
-        "09": "Empregado(a)",
-        "10": "Patrão/chefe",
-        "11": "Pessoa desconhecida",
-        "12": "Policial",
-        "13": "Outro",
-        "": "Não aplicável"
-    },
-
-    "V019": {
-        "1": "Residência",
-        "2": "Trabalho",
-        "3": "Estudo",
-        "4": "Bar/restaurante",
-        "5": "Via pública",
-        "6": "Outro",
-        "": "Não aplicável"
-    },
-    "V02701": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V02702": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V02801": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V02802": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-
-    "V029": {"1": "Muitas vezes", "2": "Algumas vezes", "3": "Uma vez", "": "Não aplicável"},
-
-    "V032": {  
-        "01": "Cônjuge/companheiro(a)",
-        "02": "Ex-cônjuge/companheiro(a)",
-        "03": "Namorado(a)/ex",
-        "04": "Pai/mãe/padrasto/madrasta",
-        "05": "Filho(a)/enteado(a)",
-        "06": "Irmão(ã)",
-        "07": "Outro parente",
-        "08": "Amigo/colega/vizinho",
-        "09": "Empregado(a)",
-        "10": "Patrão/chefe",
-        "11": "Pessoa desconhecida",
-        "12": "Policial",
-        "13": "Outro",
-        "": "Não aplicável"
-    },
-    "V033": {
-        "1": "Residência",
-        "2": "Trabalho",
-        "3": "Estudo",
-        "4": "Bar/restaurante",
-        "5": "Via pública",
-        "6": "Outro",
-        "": "Não aplicável"
-    },
-    "V034": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V03501": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V03502": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V03503": {"1": "Sim", "2": "Não", "": "Não aplicável"},
-    "V036": {"1": "Sim", "2": "Não", "" : "Não aplicável"},
-    "V037": {"1": "Sim", "2": "Não", "" : "Não aplicável"},
-    "V038": {
-        "01": "No local",
-        "02": "Farmácia",
-        "03": "UBS/PSF",
-        "04": "Policlínica",
-        "05": "UPA/pronto atendimento público",
-        "06": "Ambulatório hospital público",
-        "07": "Consultório/Clínica privada",
-        "08": "Pronto atendimento privado",
-        "09": "Atendimento domiciliar",
-        "10": "Outro serviço",
-        "": "Não aplicável"
-    },
-
-    "V039": {"1": "Sim", "2": "Não", "": "Não aplicável"},
+NOMES = {
+    'V0001': 'uf',
+    'V0024': 'estrato',
+    'UPA_PNS': 'upa',
+    'V0006_PNS': 'domicilio',
+    'V0026': 'situacao_censitaria',
+    'C006': 'sexo',
+    'C008': 'idade',
+    'C009': 'raca_cor',
+    'V00291': 'peso_amostral',
+    'V001': 'privacidade_assegurada',
+    'V00201': 'psi_humilhacao_publica',
+    'V00202': 'psi_gritos',
+    'V00203': 'psi_ameaca_digital',
+    'V00204': 'psi_ameaca_terceiro',
+    'V00205': 'psi_destruiu_bem',
+    'V003': 'psi_frequencia',
+    'V006': 'psi_agressor',
+    'V007': 'psi_local',
+    'V01401': 'fis_tapa',
+    'V01402': 'fis_empurrao',
+    'V01403': 'fis_soco_chute',
+    'V01404': 'fis_estrangulamento',
+    'V01405': 'fis_arma',
+    'V015': 'fis_frequencia',
+    'V018': 'fis_agressor',
+    'V019': 'fis_local',
+    'V02701': 'sex_toque_forcado_12m',
+    'V02702': 'sex_relacao_forcada_12m',
+    'V02801': 'sex_toque_forcado_vida',
+    'V02802': 'sex_relacao_forcada_vida',
+    'V029': 'sex_frequencia',
+    'V032': 'sex_agressor',
+    'V033': 'sex_local',
+    'V034': 'deixou_atividades',
 }
 
-# ------------------- Funções de Processamento -------------------
+DOMINIOS = {
+    'uf': {
+        '11': 'Rondônia',
+        '12': 'Acre',
+        '13': 'Amazonas',
+        '14': 'Roraima',
+        '15': 'Pará',
+        '16': 'Amapá',
+        '17': 'Tocantins',
+        '21': 'Maranhão',
+        '22': 'Piauí',
+        '23': 'Ceará',
+        '24': 'Rio Grande do Norte',
+        '25': 'Paraíba',
+        '26': 'Pernambuco',
+        '27': 'Alagoas',
+        '28': 'Sergipe',
+        '29': 'Bahia',
+        '31': 'Minas Gerais',
+        '32': 'Espírito Santo',
+        '33': 'Rio de Janeiro',
+        '35': 'São Paulo',
+        '41': 'Paraná',
+        '42': 'Santa Catarina',
+        '43': 'Rio Grande do Sul',
+        '50': 'Mato Grosso do Sul',
+        '51': 'Mato Grosso',
+        '52': 'Goiás',
+        '53': 'Distrito Federal',
+    },
+    'situacao_censitaria': {
+        '1': 'Urbano',
+        '2': 'Rural',
+    },
+    'sexo': {
+        '1': 'Homem',
+        '2': 'Mulher',
+    },
+    'idade': {
+        '000 a 130': 'Idade (em anos)',
+    },
+    'raca_cor': {
+        '1': 'Branca',
+        '2': 'Preta',
+        '3': 'Amarela',
+        '4': 'Parda',
+        '5': 'Indígena',
+        '9': 'Ignorado',
+    },
+    'privacidade_assegurada': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'psi_humilhacao_publica': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'psi_gritos': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'psi_ameaca_digital': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'psi_ameaca_terceiro': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'psi_destruiu_bem': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'psi_frequencia': {
+        '1': 'Muitas vezes',
+        '2': 'Algumas vezes',
+        '3': 'Uma vez',
+    },
+    'psi_agressor': {
+        '01': 'Cônjuge ou companheiro (a)',
+        '02': 'Ex-Cônjuge ou ex-companheiro (a)',
+        '03': 'Parceiro (a), namorado (a), ex-parceiro (a), ex-namorado (a)',
+        '04': 'Pai, mãe, padrasto ou madrasta',
+        '05': 'Filho(a), enteado(a)',
+        '06': 'Irmão(ã)',
+        '07': 'Outro parente',
+        '08': 'Amigo(a)/colega, vizinho(a)',
+        '09': 'Empregado (a) em geral',
+        '10': 'Patrão/patroa/chefe',
+        '11': 'Pessoa desconhecida',
+        '12': 'Policial',
+        '13': 'Outro',
+    },
+    'psi_local': {
+        '1': 'Residência',
+        '2': 'Trabalho',
+        '3': 'Escola, faculdade ou outro estabelecimento de ensino',
+        '4': 'Bar, restaurante ou similar',
+        '5': 'Via pública ou outro local público',
+        '6': 'Internet/Redes Sociais/Celular',
+        '7': 'Outro',
+    },
+    'fis_tapa': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'fis_empurrao': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'fis_soco_chute': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'fis_estrangulamento': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'fis_arma': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'fis_frequencia': {
+        '1': 'Muitas vezes',
+        '2': 'Algumas vezes',
+        '3': 'Uma vez',
+    },
+    'fis_agressor': {
+        '01': 'Cônjuge ou companheiro (a)',
+        '02': 'Ex-Cônjuge ou ex-companheiro (a)',
+        '03': 'Parceiro (a), namorado (a), ex-parceiro (a), ex-namorado (a',
+        '04': 'Pai, mãe, padrasto ou madrasta',
+        '05': 'Filho(a), enteado(a',
+        '06': 'Irmão(ã)',
+        '07': 'Outro parente',
+        '08': 'Amigo(a)/colega, vizinho(a)',
+        '09': 'Empregado (a) em geral',
+        '10': 'Patrão/patroa/chefe(a)',
+        '11': 'Pessoa desconhecida',
+        '12': 'Policial',
+        '13': 'Outro',
+    },
+    'fis_local': {
+        '1': 'Residência',
+        '2': 'Trabalho',
+        '3': 'Escola, faculdade ou outro estabelecimento de ensino',
+        '4': 'Bar, restaurante ou similar',
+        '5': 'Via pública ou outro local público',
+        '6': 'Outro',
+    },
+    'sex_toque_forcado_12m': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'sex_relacao_forcada_12m': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'sex_toque_forcado_vida': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'sex_relacao_forcada_vida': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'sex_frequencia': {
+        '1': 'Muitas vezes',
+        '2': 'Algumas vezes',
+        '3': 'Uma vez',
+    },
+    'sex_agressor': {
+        '01': 'Cônjuge ou companheiro (a)',
+        '02': 'Ex-Cônjuge ou ex-companheiro (a',
+        '03': 'Parceiro (a), namorado (a), ex-parceiro (a), ex-namorado (a)',
+        '04': 'Pai, mãe, padrasto ou madrasta',
+        '05': 'Filho(a), enteado(a)',
+        '06': 'Irmão(ã)',
+        '07': 'Outro parente',
+        '08': 'Amigo(a)/colega, vizinho(a',
+        '09': 'Empregado (a) em geral',
+        '10': 'Patrão/patroa/chefe',
+        '11': 'Pessoa desconhecida',
+        '12': 'Policial',
+        '13': 'Outro',
+    },
+    'sex_local': {
+        '1': 'Residência',
+        '2': 'Trabalho',
+        '3': 'Escola, faculdade ou outro estabelecimento de ensino',
+        '4': 'Bar, restaurante ou similar',
+        '5': 'Via pública ou outro local público',
+        '6': 'Outro',
+    },
+    'deixou_atividades': {
+        '1': 'Sim',
+        '2': 'Não',
+    },
+    'peso_amostral': {
+        '5 dígitos e 8 casas decimais': 'Peso do morador selecionado com correção de não entrevista com calibração pela projeção de população para morador selecionado - Usado no cálculo de indicadores de morador selecionado',
+    },
+}
+
+
 def ajuste(df):
-    """Idade vem zero-preenchida no layout posicional."""
-    df["Idade"] = df["Idade"].astype(str).str.lstrip("0").replace("", "0")
+    """Idade e peso vêm zero-preenchidos no layout posicional."""
+    df["idade"] = df["idade"].str.lstrip("0").replace("", "0")
+    df["peso_amostral"] = pd.to_numeric(df["peso_amostral"], errors="coerce") / 10**8
     return df
 
 
-def filtro(df):
-    mulheres = df[df["Sexo"] == "Feminino"]
-    return mulheres[mulheres[COLUNAS_VIOLENCIA].eq("Sim").any(axis=1)]
+def preparar(df):
+    # 2019 usa "Mulher"; 2013 usa "Feminino"
+    r = df[df["sexo"] == "Mulher"]
+    r = r[r[COLUNAS_VIOLENCIA].eq("Sim").any(axis=1)]
+    if r.empty:
+        return r
+    r = r.copy()
+    r["parceiro_intimo"] = r[COLUNAS_AGRESSOR].isin(AGRESSOR_PARCEIRO_INTIMO).any(axis=1)
+    return r
 
 
 if __name__ == "__main__":
     sys.exit(processar_pns(
         arquivo=ARQUIVO,
-        posicoes=colunas_posicoes,
-        nomes=colunas_nomes,
-        mapeamentos=mapeamentos,
-        filtro=filtro,
+        posicoes=POSICOES,
+        nomes=NOMES,
+        dominios=DOMINIOS,
+        saidas=[(SAIDA, preparar)],
         pasta_bucket=PASTA_BUCKET,
-        nome_saida=NOME_SAIDA,
         ajuste=ajuste,
     ))
