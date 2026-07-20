@@ -1,22 +1,16 @@
-import os
-import logging
-import pandas as pd
-from pathlib import Path
+"""PNS/IBGE 2013 -- mulheres que declararam ter sofrido violência.
 
-# -----------------------------
-# Logging
-# -----------------------------
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+Microdados de posição fixa em MANUAL_DIR (ver env.example).
+Recorte: Sexo = Feminino e O025 (sofreu violência) = Sim.
+"""
+import sys
 
-# ------------------- Caminhos e Diretórios -------------------
-CURRENT_DIR = Path(__file__).resolve().parent
-BASE_DIR = CURRENT_DIR.parent.parent.parent
-PROCESSED_DIR = BASE_DIR / "data" / "processed" / "ibge"
-LANDING_DIR = BASE_DIR / "data" / "processed" / "ibge" / "raw"
+from scripts.common.paths import MANUAL_PNS_DIR
+from scripts.process.ibge.base_process_pns import processar_pns
 
-ARQUIVO_ENTRADA = LANDING_DIR / "PNS_2013.txt"
-ARQUIVO_SAIDA = PROCESSED_DIR / "pns_violencia_dom_2013.csv"
+PASTA_BUCKET = "ibge"
+ARQUIVO = MANUAL_PNS_DIR / "PNS_2013.txt"
+NOME_SAIDA = "pns_violencia_domestica_2013.parquet"
 
 colunas_posicoes = {
     "V0001": (0, 2), 
@@ -181,46 +175,17 @@ mapeamentos = {
     "O048": {"1": "Sim", "2": "Não", "": "Não aplicável"}
 }
 
-# ------------------- Funções de Processamento -------------------
-def extrair_linha(linha):
-    resultado = {}
-    for col, (inicio, fim) in colunas_posicoes.items():
-        valor = linha[inicio:fim].strip()
-        resultado[col] = mapeamentos.get(col, {}).get(valor, valor)
-    return resultado
+def filtro(df):
+    return df[(df["Vítima sofreu violência"] == "Sim") & (df["Sexo"] == "Feminino")]
 
-def main():
-    if not ARQUIVO_ENTRADA.exists():
-        logger.error(f"Arquivo não encontrado: {ARQUIVO_ENTRADA}")
-        logger.error("Verifique se o arquivo .txt foi baixado para a pasta correta.")
-        return
-
-    logger.info("Iniciando leitura e processamento do arquivo de microdados PNS 2013...")
-    dados = []
-    
-    with open(ARQUIVO_ENTRADA, "r", encoding="utf-8") as f:
-        for i, linha in enumerate(f):
-            if linha.strip():
-                dados.append(extrair_linha(linha))
-            if i > 0 and i % 50000 == 0:
-                logger.info(f"{i} linhas lidas...")
-
-    logger.info("Convertendo para Pandas DataFrame...")
-    df = pd.DataFrame(dados)
-
-    logger.info("Renomeando colunas e aplicando filtros de Feminicídio...")
-    df.rename(columns={col: nome for col, nome in colunas_nomes.items()}, inplace=True)
-
-    df_filtrado = df[(df["Vítima sofreu violência"] == "Sim") & (df["Sexo"] == "Feminino")]
-
-    logger.info(f"Filtro aplicado. Total de registros retidos: {len(df_filtrado)}")
-
-    logger.info("Exportando dados processados para CSV...")
-    ARQUIVO_SAIDA.parent.mkdir(parents=True, exist_ok=True)
-    
-    df_filtrado.to_csv(ARQUIVO_SAIDA, index=False, sep=",", encoding="utf-8-sig")
-    
-    logger.info(f"✔ Arquivo salvo com sucesso em: {ARQUIVO_SAIDA}")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(processar_pns(
+        arquivo=ARQUIVO,
+        posicoes=colunas_posicoes,
+        nomes=colunas_nomes,
+        mapeamentos=mapeamentos,
+        filtro=filtro,
+        pasta_bucket=PASTA_BUCKET,
+        nome_saida=NOME_SAIDA,
+    ))

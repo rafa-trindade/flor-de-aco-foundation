@@ -1,16 +1,7 @@
-"""Registro central das fontes do pipeline.
+"""Registro das fontes: módulos de extract/process e pasta no bucket.
 
-Um lugar só define, para cada fonte: os módulos de extract/process, se
-tem fetch automatizado, e em qual pasta do bucket ela publica. run_all.py
-e o load para o Kaggle leem daqui.
-
-pasta_bucket é a chave do modelo streaming: é onde o Parquet final é
-publicado e onde fica o _manifest.json que controla o incremental. Os
-scripts de extract/process precisam usar exatamente esse mesmo valor.
-
-Para adicionar uma fonte:
-  1. Escreva o extract/process seguindo o padrão das existentes.
-  2. Registre aqui.
+pasta_bucket precisa bater com o valor usado nos scripts da fonte -- é
+onde ficam o Parquet publicado e o _manifest.json.
 """
 from dataclasses import dataclass, field
 
@@ -48,15 +39,6 @@ FONTES: list[Fonte] = [
             "Nesse caso use SOCKS5_PROXY_ENABLED=true (ver base_ftp.py) ou "
             "rode o extract localmente."
         ),
-    ),
-    Fonte(
-        id="mjsp",
-        nome="Sinesp/MJSP -- feminicídio explícito e MVI feminina",
-        pasta_bucket="mjsp",
-        automatica=True,
-        extract_modules=["scripts.extract.mjsp.fetch_sinesp_seguranca_publica"],
-        process_modules=["scripts.process.mjsp.process_sinesp_feminicidio"],
-        nota="Indicador de feminicídio fica vazio até o Sinesp publicá-lo.",
     ),
     Fonte(
         id="ibge_pns",

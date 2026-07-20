@@ -1,23 +1,8 @@
-"""Verificação de novidade contra o BUCKET, não contra disco local.
+"""Acesso ao bucket e controle de novidade.
 
-Nada fica persistido localmente após o upload, então o bucket é a fonte
-de verdade sobre "isso já existe?".
-
-Fluxo típico num fetch/process:
-
-    if already_in_bucket(s3_key, tamanho_local_esperado=tamanho_no_ftp):
-        continue
-    ... baixa/processa ...
-    upload_and_cleanup(caminho_local, s3_key)
-
-O MANIFESTO resolve o caso de vários arquivos-fonte (ex: um .dbc por ano)
-virarem um único output consolidado: não há chave 1-pra-1 no bucket para
-checar cada bruto, então registra-se nome -> tamanho num JSON pequeno
-dentro da própria pasta.
-
-Chaves do manifesto são normalizadas em MAIÚSCULAS: o FTP do DATASUS
-devolve o mesmo arquivo ora como .dbc ora como .DBC, e comparação
-sensível a caixa faz o pipeline rebaixar e duplicar o dado no merge.
+O bucket é a fonte de verdade: nada fica persistido localmente após o
+upload. O manifesto cobre o caso de vários arquivos-fonte virarem um
+único output, onde não há chave 1-pra-1 no bucket para comparar.
 """
 import hashlib
 import json
@@ -92,10 +77,8 @@ def already_in_bucket(s3_key: str, tamanho_local_esperado: int | None = None,
                        caminho_local_para_hash: Path | None = None) -> bool:
     """True se o bucket já tem esse arquivo equivalente ao local.
 
-    Só tamanho: rápido (um head_object), suficiente para arquivos grandes
-    cuja origem já reporta tamanho confiável (.dbc do FTP).
-    Com caminho_local_para_hash: compara MD5 também -- para arquivos
-    processados, onde mesmo tamanho por coincidência preocupa mais.
+    Só tamanho é suficiente quando a origem reporta tamanho confiável.
+    caminho_local_para_hash adiciona comparação de MD5.
     """
     tamanho_remoto = _tamanho_remoto(s3_key)
     if tamanho_remoto is None:

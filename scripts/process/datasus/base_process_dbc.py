@@ -1,11 +1,7 @@
 """Conversão .dbc -> Parquet com publicação incremental no bucket.
 
-Fluxo: DBC -> DBF -> Parquets intermediários -> consolidação DuckDB ->
-merge com o Parquet já publicado -> upload -> limpeza local.
-
-A coluna _ARQUIVO_ORIGEM é gravada em cada linha para permitir o merge
-incremental: ao reprocessar um arquivo revisado pelo DATASUS, as linhas
-antigas dele são removidas antes de inserir as novas, sem duplicar.
+_ARQUIVO_ORIGEM é gravado em cada linha: permite remover as linhas de um
+arquivo revisado antes de inserir as novas, sem duplicar.
 """
 import os
 import gc
@@ -21,30 +17,16 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from scripts.common.paths import DUCKDB_TEMP_DIR
+from scripts.common.publish import conectar_duckdb, ROW_GROUP_SIZE
 from scripts.common import simpledbf_patch  # corrige datas zeradas (00000000)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
-ROW_GROUP_SIZE = 250_000
-MEMORY_LIMIT = '4GB'
-THREADS = 4
+logger = logging.getLogger(__name__)
 
 # Strings que o astype(str) produz a partir de valores ausentes. O
 # comportamento varia por versão do pandas (2.x gera 'nan' literal, 3.x
 # preserva NaN), então a limpeza roda sempre.
 _STRINGS_NULAS = ["nan", "NaN", "NaT", "None", "", "<NA>"]
-
-
-def _conectar_duckdb():
-    DUCKDB_TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(database=':memory:', config={
-        'temp_directory': str(DUCKDB_TEMP_DIR),
-        'memory_limit': MEMORY_LIMIT,
-    })
-    con.execute(f"PRAGMA threads={THREADS};")
-    return con
 
 
 def listar_dbc_deduplicados(dbc_dir: Path) -> list[str]:
@@ -67,9 +49,8 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
                              apagar_dbc: bool = True) -> bool:
     """Converte .dbc do diretório para um Parquet consolidado.
 
-    filtro_chunk: recebe e devolve um DataFrame, aplicado por chunk antes
-    de escrever. Usado para pré-filtrar (ex: SEXO=2 no SIM) e evitar
-    carregar dado irrelevante nas fases seguintes.
+    filtro_chunk: aplicado por chunk antes de escrever, para não carregar
+    dado irrelevante adiante.
     """
     arquivos_dbc = listar_dbc_deduplicados(dbc_dir)
     if not arquivos_dbc:
@@ -161,7 +142,7 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
     con = None
     sucesso = False
     try:
-        con = _conectar_duckdb()
+        con = conectar_duckdb()
         con.execute(f"""
             COPY (SELECT * FROM read_parquet('{padrao}', union_by_name=True))
             TO '{parquet_final_path}' (FORMAT PARQUET, ROW_GROUP_SIZE {ROW_GROUP_SIZE});
@@ -182,9 +163,8 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
 def _limpar_residuos(dbc_dir: Path, temp_dir: Path):
     """Remove .dbf órfãos e a pasta temporária.
 
-    No Windows os.remove() pode ser aceito sem erro mas não efetivar se
-    algum handle continuar aberto (datasus_dbc.decompress é lib C e nem
-    sempre libera na hora). Daí a varredura no fim, com retry.
+    No Windows os.remove() pode não efetivar se algum handle seguir
+    aberto (datasus_dbc.decompress é lib C). Daí o retry.
     """
     for residuo in list(dbc_dir.glob("*.dbf")) + list(dbc_dir.glob("*.DBF")):
         for tentativa in range(3):
@@ -213,9 +193,8 @@ def processar_e_publicar_incremental(dbc_dir: Path, pasta_bucket: str, nome_arqu
                                       query_transformacao: str | None = None) -> bool:
     """Processa .dbc novos e mescla com o Parquet já publicado.
 
-    query_transformacao: SELECT aplicado sobre os dados novos antes do
-    merge. Use o token __ORIGEM__ onde entra a fonte -- não use {} de
-    format(), que colide com a sintaxe MAP {...} do DuckDB.
+    query_transformacao: use o token __ORIGEM__ para a fonte. Não use {}
+    de format(), que colide com a sintaxe MAP {...} do DuckDB.
     """
     from botocore.exceptions import ClientError
 
@@ -238,7 +217,7 @@ def processar_e_publicar_incremental(dbc_dir: Path, pasta_bucket: str, nome_arqu
     if query_transformacao:
         parquet_transformado = dbc_dir / "_novos_transformado.parquet"
         select = query_transformacao.replace("__ORIGEM__", f"read_parquet('{parquet_novos}')")
-        con = _conectar_duckdb()
+        con = conectar_duckdb()
         try:
             con.execute(f"""
                 COPY ({select})
@@ -268,7 +247,7 @@ def processar_e_publicar_incremental(dbc_dir: Path, pasta_bucket: str, nome_arqu
             return False
 
     final = dbc_dir / nome_arquivo_final
-    con = _conectar_duckdb()
+    con = conectar_duckdb()
     try:
         if tem_existente:
             lista = ", ".join(f"'{n}'" for n in nomes_novos)

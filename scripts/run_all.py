@@ -5,7 +5,7 @@ registradas em scripts/config/fontes.py, em sequência.
 
 Uso:
     python3 run_all.py                 # roda tudo (extract + process + load, se houver novidade)
-    python3 run_all.py --only mjsp     # roda só uma fonte; load roda se ELA tiver novidade
+    python3 run_all.py --only datasus_sim  # roda só uma fonte; load roda se ELA tiver novidade
     python3 run_all.py --process-only  # pula o extract, só reprocessa
     python3 run_all.py --force-load    # força load mesmo sem novidade (ex: após atualizar fonte manual)
     python3 run_all.py --no-load       # nunca roda load_to_bucket/load_to_kaggle
@@ -24,7 +24,7 @@ Um extract pode terminar de 3 jeitos: sucesso com dado novo, sucesso sem
 nada de novo, ou erro. O process só roda no primeiro caso -- não faz
 sentido reprocessar (às vezes caro, como a conversão .dbc -> parquet do
 SIM) quando nada mudou desde a última execução. Scripts que não usam
-scripts.common.exit_codes (ex: macroregiao, mjsp) são tratados como
+scripts.common.exit_codes (ex: macroregiao, datasus_sim) são tratados como
 "sempre com novidade" por padrão -- comportamento igual ao de antes.
 """
 import argparse

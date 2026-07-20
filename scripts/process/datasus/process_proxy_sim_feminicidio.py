@@ -1,12 +1,7 @@
 """SIM/DATASUS -- óbitos femininos por agressão (CID-10 X85-Y09).
 
-Recorte: SEXO = 2 (feminino) e CAUSABAS no grupo de agressões. O filtro
-roda já na Fase 1 (por chunk), antes de escrever os parquets
-intermediários -- a maior parte do arquivo de causas externas é
-irrelevante aqui e não vale carregar adiante.
-
-Y35 (intervenção legal) NÃO entra: a CID-10 o exclui do grupo de
-agressões. Ver scripts/config/cid_agressao.py.
+Recorte: SEXO=2 e CAUSABAS no grupo de agressões, filtrado já na Fase 1
+para não carregar o resto do arquivo de causas externas adiante.
 """
 import sys
 
@@ -20,7 +15,7 @@ from scripts.config import sim_dominios
 
 DBC_DIR = LANDING_DIR / "datasus" / "dbc_sim_causas_externas"
 PASTA_BUCKET = "datasus_sim"
-NOME_ARQUIVO_FINAL = "feminicidio_serie_historica.parquet"
+NOME_ARQUIVO_FINAL = "proxy_sim_feminicidio.parquet"
 
 
 def _map_sql(mapa: dict) -> str:

@@ -1,21 +1,10 @@
 """CID-10, grupo X85-Y09 (Agressões), Capítulo XX.
 
-Estrutura real da classificação, que o dicionário anterior do projeto não
-seguia: os 3 primeiros caracteres definem o MÉTODO da agressão, e o 4º
-caractere subdivide.
+Os 3 primeiros caracteres definem o método; o 4º subdivide por LOCAL de
+ocorrência, exceto em Y06/Y07, onde subdivide por AGRESSOR.
 
-O 4º caractere tem dois significados diferentes:
-  - X85-Y05, Y08, Y09 -> LOCAL de ocorrência (.0 residência ... .9 n/e)
-  - Y06, Y07          -> AGRESSOR (.0 esposo/companheiro, .1 pais ...)
-
-Y06/Y07 são especialmente relevantes aqui: Y060 e Y070 identificam
-explicitamente violência por parceiro íntimo.
-
-Y35 (intervenção legal) NÃO faz parte deste grupo -- a própria CID-10 o
-lista como exclusão de X85-Y09. São mortes por ação do Estado, categoria
-conceitualmente distinta de agressão interpessoal.
-
-Fonte: CID-10 Cap. XX, grupo X85-Y09 (OMS / DATASUS).
+Y35 (intervenção legal) não pertence ao grupo -- a CID-10 o lista como
+exclusão de X85-Y09.
 """
 
 # 3 primeiros caracteres -> método da agressão

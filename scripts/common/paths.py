@@ -1,25 +1,7 @@
-"""Caminhos centrais do projeto, usados por extract/process/load.
+"""Caminhos do projeto. Overrides via .env (ver env.example).
 
-LANDING_DIR e PROCESSED_DIR são scratch space temporário: arquivos passam
-por elas durante o processamento e são apagados após publicação no bucket
-(ver scripts.common.bucket_sync). Fontes como o SIM acumulam vários GB
-durante uma execução -- daí o override de disco via .env.
-
-MANUAL_DIR e PUBLISH_CACHE_DIR são persistentes e nunca apagadas:
-
-- MANUAL_DIR: fontes sem fetch automatizado (DataSenado, PNS/IBGE,
-  geolocalização das macrorregiões). Ficam FORA de landing/processed de
-  propósito -- são insumo que só se recupera baixando de novo na mão, não
-  pode correr risco de cair numa limpeza de scratch.
-- PUBLISH_CACHE_DIR: cópia local do dataset publicado no Kaggle,
-  reaproveitada entre execuções para baixar do bucket só o que mudou.
-
-Overrides disponíveis no .env:
-    FLOR_DE_ACO_LANDING_DIR=D:\\flor-de-aco\\landing
-    FLOR_DE_ACO_PROCESSED_DIR=D:\\flor-de-aco\\processed
-    FLOR_DE_ACO_MANUAL_DIR=D:\\flor-de-aco\\manual
-    FLOR_DE_ACO_PUBLISH_CACHE_DIR=D:\\flor-de-aco\\kaggle-publish-cache
-    DUCKDB_TEMP_DIR=D:\\flor-de-aco\\.duckdb_temp
+LANDING_DIR/PROCESSED_DIR são scratch: apagados após publicação.
+MANUAL_DIR e PUBLISH_CACHE_DIR são persistentes.
 """
 import os
 from pathlib import Path

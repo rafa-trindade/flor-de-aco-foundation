@@ -1,22 +1,33 @@
-import os
-import logging
-import pandas as pd
-from pathlib import Path
+"""PNS/IBGE 2019 -- mulheres que declararam ter sofrido violência.
 
-# -----------------------------
-# Logging
-# -----------------------------
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+Microdados de posição fixa em MANUAL_DIR (ver env.example).
+Recorte: Sexo = Feminino e "Sim" em qualquer das perguntas de violência
+-- em 2019 o questionário passou a detalhar os tipos em colunas
+separadas, no lugar da pergunta única de 2013.
+"""
+import sys
 
-# ------------------- Caminhos e Diretórios -------------------
-CURRENT_DIR = Path(__file__).resolve().parent
-BASE_DIR = CURRENT_DIR.parent.parent.parent
-PROCESSED_DIR = BASE_DIR / "data" / "processed" / "ibge"
-LANDING_DIR = BASE_DIR / "data" / "processed" / "ibge" / "raw"
+from scripts.common.paths import MANUAL_PNS_DIR
+from scripts.process.ibge.base_process_pns import processar_pns
 
-ARQUIVO_ENTRADA = LANDING_DIR / "PNS_2019.txt"
-ARQUIVO_SAIDA = PROCESSED_DIR / "pns_violencia_dom_2019.csv"
+PASTA_BUCKET = "ibge"
+ARQUIVO = MANUAL_PNS_DIR / "PNS_2019.txt"
+NOME_SAIDA = "pns_violencia_domestica_2019.parquet"
+
+COLUNAS_VIOLENCIA = [
+    "Ofensa/humilhação em público (12 meses)",
+    "Gritos/xingamentos (12 meses)",
+    "Ameaças/redes sociais (12 meses)",
+    "Ameaça contra pessoa importante (12 meses)",
+    "Destruiu algo seu (12 meses)",
+    "Agressão física: tapa/bofetada",
+    "Agressão física: empurrão/segurar/jogar objeto",
+    "Agressão física: soco/chute/puxão de cabelo",
+    "Agressão física: estrangular/asfixiar/queimar",
+    "Agressão física com arma (faca, arma de fogo)",
+    "Violência sexual (12 meses): toque/beijo/manipulação",
+    "Violência sexual (12 meses): ameaça/forçar ato sexual",
+]
 
 colunas_posicoes = {
     "V0001": (0, 2),
@@ -273,66 +284,25 @@ mapeamentos = {
 }
 
 # ------------------- Funções de Processamento -------------------
-def extrair_linha(linha):
-    resultado = {}
-    for col, (inicio, fim) in colunas_posicoes.items():
-        valor = linha[inicio:fim].rstrip() 
-        resultado[col] = mapeamentos.get(col, {}).get(valor, valor)
-    return resultado
+def ajuste(df):
+    """Idade vem zero-preenchida no layout posicional."""
+    df["Idade"] = df["Idade"].astype(str).str.lstrip("0").replace("", "0")
+    return df
 
-def main():
-    if not ARQUIVO_ENTRADA.exists():
-        logger.error(f"Arquivo não encontrado: {ARQUIVO_ENTRADA}")
-        logger.error("Verifique se o arquivo .txt foi baixado para a pasta correta.")
-        return
 
-    logger.info("Iniciando leitura e processamento do arquivo de microdados PNS 2019...")
-    dados = []
-    
-    with open(ARQUIVO_ENTRADA, "r", encoding="utf-8") as f:
-        for i, linha in enumerate(f):
-            if linha.strip():
-                dados.append(extrair_linha(linha))
-            if i > 0 and i % 50000 == 0:
-                logger.info(f"{i} linhas lidas...")
+def filtro(df):
+    mulheres = df[df["Sexo"] == "Feminino"]
+    return mulheres[mulheres[COLUNAS_VIOLENCIA].eq("Sim").any(axis=1)]
 
-    logger.info("Convertendo para Pandas DataFrame...")
-    df = pd.DataFrame(dados)
-
-    logger.info("Renomeando colunas e ajustando campos...")
-    df.rename(columns={col: nome for col, nome in colunas_nomes.items()}, inplace=True)
-
-    df["Idade"] = df["Idade"].astype(str).str.lstrip("0")
-    
-    df["Idade"] = df["Idade"].replace("", "0") 
-
-    logger.info("Aplicando filtros de Feminicídio (Mulheres que sofreram violência)...")
-    df_filtrado = df[df["Sexo"] == "Feminino"]
-    
-    violencias = [
-        "Ofensa/humilhação em público (12 meses)",
-        "Gritos/xingamentos (12 meses)",
-        "Ameaças/redes sociais (12 meses)",
-        "Ameaça contra pessoa importante (12 meses)",
-        "Destruiu algo seu (12 meses)",
-        "Agressão física: tapa/bofetada",
-        "Agressão física: empurrão/segurar/jogar objeto",
-        "Agressão física: soco/chute/puxão de cabelo",
-        "Agressão física: estrangular/asfixiar/queimar",
-        "Agressão física com arma (faca, arma de fogo)",
-        "Violência sexual (12 meses): toque/beijo/manipulação",
-        "Violência sexual (12 meses): ameaça/forçar ato sexual",
-    ]
-    df_filtrado = df_filtrado[df_filtrado[violencias].eq("Sim").any(axis=1)]
-
-    logger.info(f"Filtro aplicado. Total de registros retidos: {len(df_filtrado)}")
-
-    logger.info("Exportando dados processados para CSV...")
-    ARQUIVO_SAIDA.parent.mkdir(parents=True, exist_ok=True)
-    
-    df_filtrado.to_csv(ARQUIVO_SAIDA, index=False, sep=",", encoding="utf-8-sig")
-    
-    logger.info(f"✔ Arquivo salvo com sucesso em: {ARQUIVO_SAIDA}")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(processar_pns(
+        arquivo=ARQUIVO,
+        posicoes=colunas_posicoes,
+        nomes=colunas_nomes,
+        mapeamentos=mapeamentos,
+        filtro=filtro,
+        pasta_bucket=PASTA_BUCKET,
+        nome_saida=NOME_SAIDA,
+        ajuste=ajuste,
+    ))

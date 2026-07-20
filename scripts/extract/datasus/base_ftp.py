@@ -62,16 +62,11 @@ def _backoff(attempt: int):
 
 
 def _chave_recencia(nome_arquivo: str) -> str:
-    """Extrai os dígitos finais (competência) antes da extensão.
+    """Competência do arquivo, para ordenar por recência.
 
-    Ordenar pelo nome inteiro seria errado: nomes começam pela UF
-    (DOAC94, DOSP94...), então "os últimos N alfabeticamente" seriam
-    dominados por UFs no fim do alfabeto, não pelas datas recentes.
-
-    Ano de 2 dígitos é normalizado para 4 (mesma regra do filtro em
-    fetch_sim_causas_externas: >= 90 é 19xx, senão 20xx). Sem isso
-    DOEXT96..99 ordenam DEPOIS de DOEXT00..24, e a otimização acaba
-    verificando os anos mais antigos achando que são os recentes.
+    Ordenar pelo nome inteiro seria dominado pela UF (DOAC94, DOSP94).
+    Ano de 2 dígitos vira 4 (>= 90 é 19xx): sem isso DOEXT96..99 ordenam
+    depois de DOEXT00..24.
     """
     m = re.search(r"(\d+)\.\w+$", nome_arquivo, re.IGNORECASE)
     if not m:
@@ -171,14 +166,10 @@ def sincronizar_ftp(ftp_dir: str, output_dir: str, regra_filtro: Callable[[str],
                      verificar_ultimas_n_competencias: int = 2) -> tuple[bool, bool]:
     """Retorna (sucesso, houve_novidade).
 
-    pasta_bucket: carrega o manifesto dessa pasta UMA vez para decidir o
-    que pular, em vez de um head_object por arquivo.
-
     verificar_ultimas_n_competencias: cada checagem de tamanho abre uma
-    conexão FTP nova, o que fica caro em fontes com muitos arquivos. Como
-    o DATASUS só revisa competências recentes, agrupa por competência (ver
-    _chave_recencia) e verifica de fato apenas as N mais recentes -- todas
-    as UFs delas. Arquivos fora do manifesto são sempre verificados.
+    conexão FTP nova. Como o DATASUS só revisa competências recentes,
+    verifica de fato só as N mais recentes. Arquivos fora do manifesto
+    são sempre verificados.
     """
     ensure_output_dir(output_dir)
     logger.info(f"Conectando a {FTP_HOST} ({ftp_dir}) para listar arquivos...")
