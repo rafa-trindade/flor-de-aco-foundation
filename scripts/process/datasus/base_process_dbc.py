@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 import datasus_dbc
+import pandas as pd
 from simpledbf import Dbf5
 import duckdb
 import pyarrow as pa
@@ -85,6 +86,21 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
             parquet_writer = None
 
             for df_chunk in dbf.to_dataframe(chunksize=250_000):
+                # O DBF entrega coluna numérica com nulos como float, e
+                # astype(str) grava '4013.0' / '20170315.0'. O sufixo é
+                # artefato do float, não dado: quebra parse de data e de
+                # código (NU_IDADE_N vira 6 caracteres). Converter para
+                # Int64 antes preserva o nulo e remove o '.0'.
+                #
+                # Só converte quando todos os valores são inteiros --
+                # coluna decimal legítima passa intacta.
+                for coluna in df_chunk.columns:
+                    if not pd.api.types.is_float_dtype(df_chunk[coluna]):
+                        continue
+                    nao_nulos = df_chunk[coluna].dropna()
+                    if len(nao_nulos) and (nao_nulos == nao_nulos.round()).all():
+                        df_chunk[coluna] = df_chunk[coluna].astype("Int64")
+
                 # astype(str) uniformiza o schema entre anos (o DBF varia
                 # tipo entre competências), mas transforma NaN na string
                 # literal 'nan' -- pior que NULL, porque IS NULL não pega
@@ -100,7 +116,17 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
                         continue
 
                 df_chunk["_ARQUIVO_ORIGEM"] = arquivo
-                table = pa.Table.from_pandas(df_chunk, preserve_index=False)
+
+                # Colunas inteiramente nulas em um chunk viram pa.null(),
+                # e no chunk seguinte viram string se aparecer qualquer
+                # valor. O ParquetWriter fixa o schema no primeiro chunk e
+                # rejeita a mudança ("Table schema does not match schema
+                # used to create file"). Tudo aqui já é string por conta do
+                # astype(str) acima, então o schema é fixado como string.
+                table = pa.Table.from_pandas(
+                    df_chunk, preserve_index=False,
+                    schema=pa.schema([(c, pa.string()) for c in df_chunk.columns]),
+                )
 
                 if parquet_writer is None:
                     parquet_writer = pq.ParquetWriter(caminho_parquet, table.schema)

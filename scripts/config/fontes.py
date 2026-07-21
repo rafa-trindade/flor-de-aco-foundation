@@ -41,6 +41,35 @@ FONTES: list[Fonte] = [
         ),
     ),
     Fonte(
+        id="datasus_sinan",
+        nome="SINAN/DATASUS -- violência interpessoal contra mulheres (ficha VIOL)",
+        pasta_bucket="datasus_sinan",
+        automatica=True,
+        extract_modules=["scripts.extract.datasus.fetch_sinan_violencia"],
+        process_modules=["scripts.process.datasus.process_sinan_violencia"],
+        nota=(
+            "Violência NÃO fatal notificada em serviço de saúde, com relação "
+            "vítima-agressor -- que a Declaração de Óbito do SIM não tem. "
+            "Recorte: sexo feminino, excluindo lesão autoprovocada. Mesma "
+            "ressalva de FTP do datasus_sim."
+        ),
+    ),
+    Fonte(
+        id="datajud",
+        nome="CNJ/Datajud -- processos de violência contra a mulher",
+        pasta_bucket="datajud",
+        automatica=True,
+        extract_modules=["scripts.extract.datajud.fetch_datajud_violencia"],
+        process_modules=["scripts.process.datajud.process_datajud_violencia"],
+        nota=(
+            "Metadados processuais, sem dado de vítima -- a API não expõe "
+            "partes. Mede judicialização, não perfil. Extract com checkpoint "
+            "no bucket (API lenta e instável, extração de horas); NDJSON "
+            "bruto fica em MANUAL_DIR/datajud/. Recorte via argumento: "
+            "feminicidio (45k processos no país), gravidade ou amplo."
+        ),
+    ),
+    Fonte(
         id="ibge_pns",
         nome="PNS/IBGE -- mulheres vítimas de violência (2013 e 2019)",
         pasta_bucket="ibge",
