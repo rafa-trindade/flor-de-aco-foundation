@@ -1,16 +1,8 @@
-"""PNS/IBGE 2013 -- módulo de violência (bloco O).
+"""Mapeamento posicional PNS/IBGE 2013 (Bloco O - Violência).
 
-Posições, nomes e domínios extraídos do dicionário oficial
-(dicionario_pns_microdados_2013.xls).
-
-O questionário separa dois blocos:
-  O025-O036  violência por pessoa DESCONHECIDA (bandido, policial, assaltante)
-  O037-O048  violência por pessoa CONHECIDA (cônjuge, parente, amigo, vizinho)
-
-Só o segundo é violência doméstica/familiar. Publica os dois em arquivos
-distintos: misturá-los descaracteriza o recorte do projeto.
-
-Microdados de posição fixa em MANUAL_DIR (ver env.example).
+Separação estrutural exigida pelo questionário:
+- O037-O048 (Violência por pessoa conhecida) -> Recorte principal (Doméstica/Familiar).
+- O025-O036 (Violência por pessoa desconhecida) -> Extração apartada para não contaminar o dataset primário.
 """
 import sys
 
@@ -312,7 +304,7 @@ DOMINIOS = {
 
 
 def ajuste(df):
-    """Idade e peso vêm zero-preenchidos no layout posicional."""
+    """Correção de zero-fill em layout posicional (idade e peso amostral)."""
     df["idade"] = df["idade"].str.lstrip("0").replace("", "0")
     df["peso_amostral"] = pd.to_numeric(df["peso_amostral"], errors="coerce") / 10**8
     return df
@@ -339,10 +331,7 @@ def preparar_conhecido(df):
 
 
 def preparar_desconhecido(df):
-    """Violência por pessoa desconhecida -- assalto, ação policial.
-
-    Não é violência doméstica; fica separada para não contaminar o recorte.
-    """
+    """Isolamento de violência não-doméstica (assalto, ação policial)."""
     r = _mulheres(df)
     r = r[r["d_sofreu_violencia"] == "Sim"]
     if r.empty:

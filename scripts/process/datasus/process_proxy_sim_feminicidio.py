@@ -1,7 +1,7 @@
-"""SIM/DATASUS -- óbitos femininos por agressão (CID-10 X85-Y09).
+"""Processamento SIM/DATASUS: Óbitos femininos por agressão (CID-10 X85-Y09).
 
-Recorte: SEXO=2 e CAUSABAS no grupo de agressões, filtrado já na Fase 1
-para não carregar o resto do arquivo de causas externas adiante.
+Otimização de memória: Filtro (SEXO=2 e CAUSABAS) aplicado por chunk na Fase 1 
+para descartar registros irrelevantes antes da consolidação.
 """
 import sys
 
@@ -19,18 +19,16 @@ NOME_ARQUIVO_FINAL = "proxy_sim_feminicidio.parquet"
 
 
 def _map_sql(mapa: dict) -> str:
-    """Literal MAP do DuckDB a partir de um dict."""
     itens = ", ".join(f"'{k}': '{v.replace(chr(39), chr(39)*2)}'" for k, v in mapa.items())
     return f"MAP {{{itens}}}"
 
 
 def _lookup(mapa: dict, coluna: str) -> str:
-    """Lookup com fallback NULL quando a chave não existe no domínio."""
+    """Injeção SQL para lookup de domínio (com fallback implícito para NULL em chaves inexistentes)."""
     return f"{_map_sql(mapa)}[{coluna}]"
 
 
 def filtro_feminicidio(df):
-    """Só óbitos femininos por agressão. Aplicado por chunk na Fase 1."""
     if "SEXO" not in df.columns or "CAUSABAS" not in df.columns:
         return df.iloc[0:0]
     return df[(df["SEXO"] == "2") & (df["CAUSABAS"].isin(CODIGOS_AGRESSAO))]

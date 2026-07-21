@@ -1,7 +1,7 @@
-"""Conversão .dbc -> Parquet com publicação incremental no bucket.
+"""Conversão .dbc -> Parquet com publicação incremental.
 
-_ARQUIVO_ORIGEM é gravado em cada linha: permite remover as linhas de um
-arquivo revisado antes de inserir as novas, sem duplicar.
+Estratégia de deduplicação: A coluna `_ARQUIVO_ORIGEM` mapeia a 
+linhagem e permite idempotência (remoção e reinserção de arquivos revisados) sem duplicar dados.
 """
 import os
 import gc
@@ -24,14 +24,12 @@ from scripts.common import simpledbf_patch  # corrige datas zeradas (00000000)
 
 logger = logging.getLogger(__name__)
 
-# Strings que o astype(str) produz a partir de valores ausentes. O
-# comportamento varia por versão do pandas (2.x gera 'nan' literal, 3.x
-# preserva NaN), então a limpeza roda sempre.
+# Tratamento de nulos pós-astype(str) (Pandas 2.x converte para 'nan'
+# literal; Pandas 3.x preserva NaN).
 _STRINGS_NULAS = ["nan", "NaN", "NaT", "None", "", "<NA>"]
 
 
 def listar_dbc_deduplicados(dbc_dir: Path) -> list[str]:
-    """Lista .dbc removendo duplicatas por maiúscula/minúscula (X.DBC e X.dbc)."""
     vistos = set()
     arquivos = []
     for f in sorted(os.listdir(dbc_dir)):
@@ -48,11 +46,8 @@ def listar_dbc_deduplicados(dbc_dir: Path) -> list[str]:
 def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
                              filtro_chunk: Callable | None = None,
                              apagar_dbc: bool = True) -> bool:
-    """Converte .dbc do diretório para um Parquet consolidado.
-
-    filtro_chunk: aplicado por chunk antes de escrever, para não carregar
-    dado irrelevante adiante.
-    """
+    """Nota: `filtro_chunk` aplica restrições em memória antes da persistência para 
+    reduzir footprint de I/O."""
     arquivos_dbc = listar_dbc_deduplicados(dbc_dir)
     if not arquivos_dbc:
         logger.warning(f"Nenhum arquivo .dbc encontrado em {dbc_dir}.")
@@ -86,14 +81,9 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
             parquet_writer = None
 
             for df_chunk in dbf.to_dataframe(chunksize=250_000):
-                # O DBF entrega coluna numérica com nulos como float, e
-                # astype(str) grava '4013.0' / '20170315.0'. O sufixo é
-                # artefato do float, não dado: quebra parse de data e de
-                # código (NU_IDADE_N vira 6 caracteres). Converter para
-                # Int64 antes preserva o nulo e remove o '.0'.
-                #
-                # Só converte quando todos os valores são inteiros --
-                # coluna decimal legítima passa intacta.
+                # Correção de artefato DBF: O parser entrega inteiros com nulos tipados como float.
+                # O casting prévio para `Int64` remove o sufixo '.0' (que corromperia parsing de datas e códigos a jusante).
+                # Colunas decimais legítimas (com frações) passam intactas pela verificação.
                 for coluna in df_chunk.columns:
                     if not pd.api.types.is_float_dtype(df_chunk[coluna]):
                         continue
@@ -101,10 +91,8 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
                     if len(nao_nulos) and (nao_nulos == nao_nulos.round()).all():
                         df_chunk[coluna] = df_chunk[coluna].astype("Int64")
 
-                # astype(str) uniformiza o schema entre anos (o DBF varia
-                # tipo entre competências), mas transforma NaN na string
-                # literal 'nan' -- pior que NULL, porque IS NULL não pega
-                # e qualquer parse/cálculo erra em silêncio.
+                # `astype(str)` força coerção uniforme (banco original altera tipos entre competências).
+                # O mascaramento anula a string literal 'nan' para não quebrar validações lógicas silenciosamente (ex: IS NULL).
                 df_chunk = df_chunk.astype(str)
                 df_chunk = df_chunk.mask(df_chunk.isin(_STRINGS_NULAS))
 
@@ -117,12 +105,8 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
 
                 df_chunk["_ARQUIVO_ORIGEM"] = arquivo
 
-                # Colunas inteiramente nulas em um chunk viram pa.null(),
-                # e no chunk seguinte viram string se aparecer qualquer
-                # valor. O ParquetWriter fixa o schema no primeiro chunk e
-                # rejeita a mudança ("Table schema does not match schema
-                # used to create file"). Tudo aqui já é string por conta do
-                # astype(str) acima, então o schema é fixado como string.
+                # Workaround PyArrow: Tipagem explícita obrigatória. 
+                # Impede crash de schema inference no `ParquetWriter` se o Chunk N tiver apenas nulos (`pa.null()`) e o Chunk N+1 contiver strings.
                 table = pa.Table.from_pandas(
                     df_chunk, preserve_index=False,
                     schema=pa.schema([(c, pa.string()) for c in df_chunk.columns]),
@@ -187,10 +171,8 @@ def processar_diretorio_dbc(dbc_dir: Path, parquet_final_path: Path,
 
 
 def _limpar_residuos(dbc_dir: Path, temp_dir: Path):
-    """Remove .dbf órfãos e a pasta temporária.
-
-    No Windows os.remove() pode não efetivar se algum handle seguir
-    aberto (datasus_dbc.decompress é lib C). Daí o retry.
+    """Limpeza de temporários com política de retry.
+    Contorna restrições de file locking no Windows, onde lib C (`datasus_dbc.decompress`) retém handles abertos assincronamente.
     """
     for residuo in list(dbc_dir.glob("*.dbf")) + list(dbc_dir.glob("*.DBF")):
         for tentativa in range(3):
@@ -217,10 +199,8 @@ def _limpar_residuos(dbc_dir: Path, temp_dir: Path):
 def processar_e_publicar_incremental(dbc_dir: Path, pasta_bucket: str, nome_arquivo_final: str,
                                       filtro_chunk: Callable | None = None,
                                       query_transformacao: str | None = None) -> bool:
-    """Processa .dbc novos e mescla com o Parquet já publicado.
-
-    query_transformacao: use o token __ORIGEM__ para a fonte. Não use {}
-    de format(), que colide com a sintaxe MAP {...} do DuckDB.
+    """Injeção SQL segura via `query_transformacao`: utilize exclusivamente o token `__ORIGEM__`.
+    Evite f-strings ou `.format()` para impedir colisão léxica com a estrutura nativa `MAP {...}` do DuckDB.
     """
     from botocore.exceptions import ClientError
 
@@ -266,9 +246,6 @@ def processar_e_publicar_incremental(dbc_dir: Path, pasta_bucket: str, nome_arqu
         if codigo in ("404", "NoSuchKey"):
             logger.info(f"Nada publicado ainda em {s3_key} -- primeira publicação.")
         else:
-            # Qualquer outro erro (rede, credencial, permissão) NÃO pode
-            # virar "primeira publicação": seguir adiante sobrescreveria o
-            # histórico já publicado com apenas os arquivos desta rodada.
             logger.error(f"Falha ao baixar {s3_key} para merge ({codigo}): {e}")
             return False
 
@@ -309,7 +286,7 @@ def processar_e_publicar_incremental(dbc_dir: Path, pasta_bucket: str, nome_arqu
 def processar_fonte_ftp_incremental(dbc_dir: Path, pasta_bucket: str, nome_arquivo_final: str,
                                      filtro_chunk: Callable | None = None,
                                      query_transformacao: str | None = None) -> int:
-    """Orquestra process + atualização do manifesto. Retorna exit code."""
+
     from scripts.common import exit_codes
     from scripts.common.bucket_sync import carregar_manifesto, salvar_manifesto
 

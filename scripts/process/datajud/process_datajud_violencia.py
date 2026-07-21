@@ -1,17 +1,8 @@
-"""CNJ/Datajud -- processos de violência contra a mulher.
+"""Processamento Datajud (CNJ) -> Parquet por recorte.
 
-Lê o NDJSON bruto que o extract deixa em MANUAL_DIR e publica um Parquet
-por recorte.
-
-São metadados processuais: classe, assunto, órgão julgador, datas. A API
-não expõe partes, então não há dado da vítima -- a fonte mede
-judicialização e tramitação, complementando o SIM (óbito) e o SINAN
-(notificação em saúde).
-
-GRANULARIDADE: uma linha por ID_DATAJUD, não por processo. O mesmo
-NUMERO_PROCESSO aparece em várias linhas quando tramita em classes ou
-órgãos diferentes (apelação num gabinete, agravo em outro). Para contar
-processos distintos, use COUNT(DISTINCT NUMERO_PROCESSO).
+Atenção à GRANULARIDADE: Uma linha por `ID_DATAJUD`, não por processo. 
+`NUMERO_PROCESSO` se repete em instâncias/órgãos diferentes. Use COUNT(DISTINCT).
+Nota de negócio: Base contém apenas metadados processuais (sem dados das partes/vítimas).
 
 Uso:
     python -m scripts.process.datajud.process_datajud_violencia [recorte]
@@ -33,20 +24,15 @@ logger = logging.getLogger(__name__)
 ENTRADA_DIR = MANUAL_DIR / "datajud"
 PASTA_BUCKET = "datajud"
 
-# Ano mínimo plausível para ajuizamento. Anterior a isso é data corrompida
-# -- e há muita: no TJAC, 152 de 245 registros não caem em nenhum ano da
-# faixa 2005-2026, com o campo preenchido.
+# Filtro de sanidade: Acervo anterior a 1990 indica corrupção de dado na origem.
 ANO_MINIMO = 1990
 
-# Acima disso, o campo assuntos não traz os assuntos do processo: traz um
-# despejo da tabela de domínio. Dois registros do TJAL vêm com 565 e 566
-# códigos, cobrindo a faixa 3370-3402 inteira (todos os crimes contra a
-# pessoa da TPU). Processo real não tem dezenas de assuntos.
+# Mitigação de anomalia: Processos com dezenas de assuntos são dumps acidentais 
+# da tabela de domínio da TPU pelo Tribunal.
 LIMITE_ASSUNTOS_PLAUSIVEL = 20
 
-# UF por tribunal. A sigla do TJ identifica o estado de forma
-# determinística, e cobre o recorte geográfico dos 11% de registros sem
-# codigoMunicipioIBGE -- omissão concentrada em TJSP, TJMT, TJAL e TJAC.
+# Preenchimento determinístico de UF via sigla do Tribunal (cobre lacuna de ~11% 
+# sem codigoMunicipioIBGE).
 UF_POR_TRIBUNAL = {
     "TJAC": "AC", "TJAL": "AL", "TJAM": "AM", "TJAP": "AP", "TJBA": "BA",
     "TJCE": "CE", "TJDFT": "DF", "TJES": "ES", "TJGO": "GO", "TJMA": "MA",
@@ -58,7 +44,6 @@ UF_POR_TRIBUNAL = {
 
 
 def _lista_nomes_sql() -> str:
-    """MAP código -> nome dos assuntos conhecidos, para rotular."""
     itens = ", ".join(
         f"{cod}: '{nome.replace(chr(39), chr(39) * 2)}'"
         for cod, nome in sorted(NOMES.items())
@@ -69,33 +54,15 @@ def _lista_nomes_sql() -> str:
 def _query(recorte: str, ano_max: int) -> str:
     padrao = str(ENTRADA_DIR / recorte / "*.ndjson").replace("\\", "/")
 
-    # assuntos vem como array de objetos, mas 4 registros em 36 mil
-    # trazem array de ARRAYS (com 38, 317, 417 e 566 itens) -- e
-    # list_transform(x -> x.codigo) aborta a query inteira nesses.
-    # Extrair via JSON path é indiferente ao aninhamento.
-    #
-    # Nesses 4 a lista sai vazia em vez de aninhada: perde-se o assunto
-    # de 4 registros, contra perder a publicação inteira. Se algum dia
-    # importarem, o NDJSON bruto em MANUAL_DIR tem o dado original.
-    # '$..codigo' é busca recursiva: casa tanto o array de objetos normal
-    # quanto o array de ARRAYS de 98 registros anômalos. Com '$[*]' esses
-    # 98 saíam com código e sem nome -- linha incoerente, porque o
-    # caminho descia um nível para um e não para o outro.
-    #
-    # A recursão é segura por ser aplicada só ao campo assuntos: sobre o
-    # documento inteiro pegaria também classe.codigo e formato.codigo.
+    # Workaround DuckDB: O JSON path recursivo ('$..codigo') contorna 
+    # a presença de arrays malformados (array de arrays) na origem, impedindo o aborto da query.
     cods = ("list_transform(json_extract(TRY_CAST(assuntos AS JSON), "
             "'$..codigo'), x -> TRY_CAST(x AS INTEGER))")
     noms = (f"list_transform({cods}, x -> COALESCE(dicionario.m[x], "
             f"'ASSUNTO ' || x))")
 
-    # Campos aninhados extraídos via JSON, não por acesso a struct.
-    #
-    # Basta UM registro com tipo divergente para o read_ndjson desistir de
-    # unificar a coluna e serializá-la como binário -- que o Dremio exibe
-    # em Base64 ('Mjgy' é '282'). Aconteceu com classe.codigo, onde 2
-    # registros em 40.108 vêm como string '-1' e estragaram a leitura dos
-    # outros 40.106. O CAST explícito é imune a isso.
+    # Extração tipada via JSON impede que `read_ndjson` infira structs com tipos mistos 
+    # (ex: int e string no mesmo campo) que corrompem a leitura no Dremio (serializando em Base64).
     def _num(campo: str, chave: str) -> str:
         return (f"TRY_CAST(json_extract_string(TRY_CAST({campo} AS JSON), "
                 f"'$.{chave}') AS BIGINT)")
@@ -115,27 +82,13 @@ def _query(recorte: str, ano_max: int) -> str:
     codigos_consumacao = ", ".join(str(c) for c in INDICIO_CONSUMACAO)
     classes_protetiva = ", ".join(str(c) for c in CLASSES_MEDIDA_PROTETIVA)
 
-    # Ordem de leitura: forma > tipo > qualificadora de gênero > contexto.
-    # Alfabética espalha essa hierarquia ao acaso e esconde o que
-    # distingue tentativa de consumação numa varredura visual.
+    # Ordenação semântica forçada (forma > tipo > qualificadora > contexto).
     prioridade = "MAP {" + ", ".join(
         f"{c}: {p}" for c, p in sorted(PRIORIDADE_LEITURA.items())
     ) + "}"
 
-    # dataAjuizamento chega em três formatos na mesma coleta, verificados
-    # sobre 36.352 registros do recorte de feminicídio:
-    #   35.304  '20150729093223'            string AAAAMMDDHHMMSS
-    #    1.043  '2016-07-15T11:07:14.000Z'  string ISO-8601
-    #        5   1531796400000              epoch em milissegundos (int)
-    #
-    # Tratar só o primeiro (o formato dominante) descartaria mil datas
-    # válidas em silêncio. O CAST para VARCHAR uniformiza o int antes de
-    # testar, já que read_ndjson infere a coluna como texto quando os
-    # tipos se misturam.
-    # O read_ndjson preserva as aspas do JSON quando a coluna tem tipos
-    # mistos (string e número no mesmo campo), então '20150729093223'
-    # chega como '"20150729093223"' -- 16 caracteres, e qualquer regex de
-    # 14 dígitos falha. O trim é o que faz os três formatos casarem.
+    # Regex parsing multinível para contornar três padrões simultâneos na API:
+    # String 14 chars, ISO-8601, e Epoch MS (int). Trim no varchar neutraliza aspas do JSON.
     bruto = "trim(TRY_CAST(dataAjuizamento AS VARCHAR), '\"')"
     dt_valida = f"""
         CASE
@@ -149,17 +102,14 @@ def _query(recorte: str, ano_max: int) -> str:
                 )
         END
     """
-    # A data válida ainda precisa cair num ano plausível: valor futuro ou
-    # anterior ao ANO_MINIMO é corrupção, não dado.
+
     dt_valida = f"""
         CASE WHEN year({dt_valida}) BETWEEN {ANO_MINIMO} AND {ano_max}
              THEN {dt_valida} END
     """
 
-    # O padrão CNJ do número único (Res. 65/2008) põe o ano de ajuizamento
-    # nas posições 10-13: NNNNNNNDD AAAA J TR OOOO. Quando a data está
-    # corrompida, o número costuma estar íntegro -- é a única via de
-    # recuperar o ano desses registros.
+    # Fallback de ano: Extração posicional do ano (10-13) conforme Res. 65/2008 
+    # do CNJ (NNNNNNNDD AAAA J TR OOOO).
     ano_numero = f"""
         CASE WHEN regexp_full_match(numeroProcesso, '[0-9]{{20}}')
              THEN TRY_CAST(substr(numeroProcesso, 10, 4) AS INTEGER)
@@ -171,34 +121,16 @@ def _query(recorte: str, ano_max: int) -> str:
             SELECT * FROM read_ndjson('{padrao}', union_by_name=true)
         ),
         deduplicado AS (
-            -- Deduplicação pelo `id`, que o glossário do Datajud define
-            -- como "Chave Tribunal_Classe_Grau_OrgaoJulgador_
-            -- NumeroProcesso" -- a unicidade da própria fonte.
-            --
-            -- Chave por numeroProcesso+tribunal+grau seria errada: o
-            -- mesmo processo tem várias entradas legítimas no mesmo grau,
-            -- uma por classe/órgão (apelação num gabinete, agravo em
-            -- outro). No TJMG isso colapsava 743 movimentações em 402.
-            --
-            -- O que se quer eliminar aqui é só a repetição do modo
-            -- incremental, em que o MESMO documento reaparece revisado.
+            -- Deduplica exclusivamente versões do mesmo documento (campo `id` do Datajud),
+            -- mantendo a multiplicidade legítima de um processo em órgãos/classes distintos.
             SELECT * FROM bruto
             QUALIFY ROW_NUMBER() OVER (
                 PARTITION BY id
                 ORDER BY dataHoraUltimaAtualizacao DESC
             ) = 1
         ),
-        -- 140 registros trazem assuntos malformado: array de arrays,
-        -- objeto só com código e sem nome, ou os dois misturados na mesma
-        -- lista. Nesses, código e nome saem em quantidades diferentes e
-        -- parear por posição desalinha -- foi o que gerou linhas com
-        -- código preenchido e nome vazio.
-        --
-        -- A saída é montar o nome pelo código, a partir de um dicionário
-        -- derivado dos próprios registros bem formados (onde as duas
-        -- listas têm o mesmo tamanho e o pareamento é confiável). Com
-        -- dezenas de milhares de registros, todo código relevante aparece
-        -- corretamente em algum deles.
+        -- Dicionário de fallback: Reconstrói o mapeamento cód->nome a partir de 
+        -- registros íntegros para contornar arrays dessincronizados/malformados na origem.
         pares AS (
             SELECT DISTINCT
                 TRY_CAST(unnest(json_extract(
@@ -229,9 +161,7 @@ def _query(recorte: str, ano_max: int) -> str:
                 CASE WHEN {ano_numero} BETWEEN {ANO_MINIMO} AND {ano_max}
                      THEN {ano_numero} END
             )                                           AS ANO_AJUIZAMENTO,
-            -- Distingue o ano confiável do recuperado: quem for agregar
-            -- série temporal precisa saber que parte veio do número do
-            -- processo porque a data era inválida.
+            -- Flag de confiabilidade temporal (Data da Capa vs Parser Numérico).
             CASE WHEN {dt_valida} IS NOT NULL THEN 'DATA'
                  WHEN {ano_numero} BETWEEN {ANO_MINIMO} AND {ano_max}
                       THEN 'NUMERO_PROCESSO'
@@ -242,10 +172,7 @@ def _query(recorte: str, ano_max: int) -> str:
 
             len({cods})                                 AS QTD_ASSUNTOS,
             len({cods}) > {LIMITE_ASSUNTOS_PLAUSIVEL}   AS ASSUNTOS_IMPLAUSIVEL,
-            -- Assuntos como texto, não lista: coluna LIST estoura o
-            -- limite de 128 elementos do Dremio (há processo com 566) e
-            -- obriga a FLATTEN em qualquer leitura. Ordenado e sem
-            -- repetição, para a mesma combinação sair sempre igual.
+            -- Casting para string agregada. Evita estouro de array (Dremio limit: 128 itens) e dispensa FLATTEN a jusante.
             list_aggregate(
                 list_transform(
                     list_sort(list_distinct(list_transform(
@@ -258,14 +185,9 @@ def _query(recorte: str, ano_max: int) -> str:
             list_aggregate(list_sort(list_distinct({cods})),
                            'string_agg', ', ')          AS COD_ASSUNTOS,
 
-            -- Flags derivadas dos assuntos. O array traz vários códigos
-            -- por processo, então elas não são exclusivas entre si.
+
             list_has_any({cods}, [{codigos_femin}])     AS TEM_FEMINICIDIO,
-            -- Duas coisas distintas, e a diferença é analítica:
-            -- DESCUMPRIMENTO vem do assunto (houve violação da protetiva);
-            -- EH_MEDIDA_PROTETIVA vem da CLASSE (o processo é o pedido de
-            -- proteção em si). Contar protetivas concedidas pelo assunto
-            -- de descumprimento subestimaria muito.
+            -- Distinção de instâncias: DESCUMPRIMENTO é Assunto (infração penal); EH_MEDIDA_PROTETIVA é Classe processual (o pedido em si).
             list_has_any({cods}, [{codigos_protetiva}]) AS TEM_DESCUMPRIMENTO_PROTETIVA,
             {_num('classe','codigo')} IN ({classes_protetiva})
                                                         AS EH_MEDIDA_PROTETIVA,
@@ -273,14 +195,8 @@ def _query(recorte: str, ano_max: int) -> str:
             list_has_any({cods}, [{codigos_tipificada}]) AS TEM_VIOLENCIA_TIPIFICADA,
             list_has_any({cods}, [{codigos_qualif}])    AS TEM_CRIME_TENTADO,
 
-            -- Três estados, não booleano. TENTATIVA vem de marcador
-            -- explícito; CONSUMADO só de indício POSITIVO (assunto que
-            -- pressupõe a morte). A ausência de "Crime Tentado" NÃO prova
-            -- consumação -- o tribunal pode não ter marcado --, então
-            -- esses casos ficam NULL, que é a maioria.
-            --
-            -- Somar os CONSUMADO como "feminicídios consumados no Brasil"
-            -- subestima o número; é um piso conhecido, não o total.
+            -- Inferência de desfecho: CONSUMADO usa proxies estritos (ex: ocultação de cadáver).
+            -- A ausência da flag 'Tentativa' resulta em NULL e não em 'Consumado' (alta subnotificação nos TJs).
             CASE
                 WHEN list_has_any({cods}, [{codigos_qualif}]) THEN 'TENTATIVA'
                 WHEN list_has_any({cods}, [{codigos_consumacao}]) THEN 'CONSUMADO'
@@ -316,12 +232,8 @@ def main(argv: list[str]) -> int:
     arquivos = sorted(origem.glob("*.ndjson"))
     logger.info(f"{len(arquivos)} tribunal(is) em {origem}.")
 
-    # Ano corrente como teto: data de ajuizamento no futuro é corrupção,
-    # não dado.
     ano_max = datetime.now().year
 
-    # Uma tabela por base: o bucket é camada de publicação, não modelo
-    # relacional. Quem analisa monta o relacionamento que precisar.
     ok = query_para_parquet(
         _query(recorte, ano_max), PASTA_BUCKET, f"datajud_{recorte}.parquet"
     )

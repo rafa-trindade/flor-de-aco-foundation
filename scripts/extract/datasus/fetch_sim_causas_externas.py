@@ -9,12 +9,11 @@ from scripts.common import exit_codes
 
 OUTPUT_DIR = str(LANDING_DIR / "datasus" / "dbc_sim_causas_externas")
 
-# Mesma pasta usada por process_sim_feminicidio.py -- é onde fica o
-# _manifest.json que diz o que já foi incorporado ao Parquet publicado.
+# Compartilhado com processamento para validação de idempotência via `_manifest.json`.
 PASTA_BUCKET = "datasus_sim"
 
 def criar_regra_doext(ano_min: int = None, ano_max: int = None):
-    """Gera a regra de validação do arquivo DOEXT com base em um intervalo de anos (4 dígitos)."""
+
     def regra(nome_arquivo: str) -> bool:
         nome = nome_arquivo.upper()
         if not (nome.startswith("DOEXT") and nome.endswith(".DBC")):

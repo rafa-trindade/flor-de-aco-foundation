@@ -1,7 +1,6 @@
-"""Macrorregião de Saúde + geolocalização dos municípios.
+"""Join de Macrorregião (MS) com geolocalização.
 
-Zero à esquerda é corrigido nos dois lados antes do join: sem isso os
-municípios com código iniciado em zero perdem o cruzamento em silêncio.
+Atenção: Correção de zero-fill à esquerda (zfill=6) é obrigatória antes do join para impedir perda silenciosa de municípios.
 """
 import sys
 
@@ -38,8 +37,7 @@ def main() -> int:
     con.register("macro", df)
     con.register("geo", df_geo)
 
-    # EXCLUDE (MUNCOD): é a mesma coluna de cod_municipio, e sem isso o
-    # resultado sai com a chave de join duplicada.
+    # EXCLUDE (MUNCOD) evita duplicação da chave de join no Parquet final.
     query = """
         SELECT m.*, g.* EXCLUDE (MUNCOD)
         FROM macro m

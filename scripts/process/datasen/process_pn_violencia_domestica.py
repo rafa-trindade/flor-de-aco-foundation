@@ -145,8 +145,6 @@ def ler_dicionario(dict_path: Path) -> tuple[dict[str, str], dict[str, dict[str,
 def aplicar_dicionario(df: pd.DataFrame, column_rename: dict, value_maps: dict) -> pd.DataFrame:
     df = df.copy()
 
-    # recodifica antes de renomear, enquanto o código da variável ainda
-    # é o nome da coluna
     for var_codigo, mapping in value_maps.items():
         if var_codigo not in df.columns:
             continue

@@ -19,8 +19,7 @@ FTP_HOST = "ftp.datasus.gov.br"
 MAX_RETRIES = 10
 RETRY_DELAY = 5
 
-# SOCKS5 opcional -- porta 21 costuma ser bloqueada em VPS/cloud.
-# Rode: ssh -R 1080 -N usuario@IP_VPS
+# SOCKS5 opcional: contorna bloqueio de porta 21 (comum em VPS/cloud) via túnel SSH.
 SOCKS5_PROXY_ENABLED = os.environ.get("SOCKS5_PROXY_ENABLED", "false").lower() in ("1", "true", "yes")
 SOCKS5_PROXY_HOST = os.environ.get("SOCKS5_PROXY_HOST", "127.0.0.1")
 SOCKS5_PROXY_PORT = int(os.environ.get("SOCKS5_PROXY_PORT", "1080"))
@@ -33,8 +32,8 @@ if SOCKS5_PROXY_ENABLED:
 
 
 class FTPPasvFix(FTP):
-    """Ignora o IP devolvido na resposta 227 (comum estar errado atrás de
-    NAT/load balancer) e usa o host da conexão de controle."""
+    """Workaround de infraestrutura: ignora IP da resposta 227 (frequentemente errado atrás de NAT/Load Balancers) 
+    e injeta o host da conexão de controle."""
     def makepasv(self):
         host, port = super().makepasv()
         host_real = self.sock.getpeername()[0]
@@ -55,19 +54,14 @@ def get_tamanho_ftp(ftp: FTP, nome_arquivo: str) -> int | None:
 
 
 def _backoff(attempt: int):
-    """Backoff exponencial com jitter, evita retries sincronizados."""
     espera = min(RETRY_DELAY * (2 ** attempt), 120) + random.uniform(0, 3)
     logger.info(f"Aguardando {espera:.1f}s antes de tentar de novo...")
     time.sleep(espera)
 
 
 def _chave_recencia(nome_arquivo: str) -> str:
-    """Competência do arquivo, para ordenar por recência.
-
-    Ordenar pelo nome inteiro seria dominado pela UF (DOAC94, DOSP94).
-    Ano de 2 dígitos vira 4 (>= 90 é 19xx): sem isso DOEXT96..99 ordenam
-    depois de DOEXT00..24.
-    """
+    """Extrai ano para ordenação temporal, tratando a virada do milênio (>=90 -> 19xx) 
+    no padrão de arquivos do DATASUS."""
     m = re.search(r"(\d+)\.\w+$", nome_arquivo, re.IGNORECASE)
     if not m:
         return nome_arquivo
@@ -80,7 +74,6 @@ def _chave_recencia(nome_arquivo: str) -> str:
 
 
 def _deduplicar_case(nomes: list[str]) -> list[str]:
-    """Remove duplicatas por maiúscula/minúscula (X.DBC e X.dbc), mantendo a primeira."""
     vistos = set()
     resultado = []
     for nome in nomes:
@@ -94,11 +87,7 @@ def _deduplicar_case(nomes: list[str]) -> list[str]:
 
 def baixar_arquivo(ftp_dir: str, nome_arquivo: str, pasta_saida: str,
                     manifesto: dict[str, int] | None = None) -> tuple[bool, bool]:
-    """Retorna (sucesso, houve_novidade).
 
-    houve_novidade=False se o arquivo já está completo localmente ou já
-    consta no manifesto com o mesmo tamanho.
-    """
     local_path = os.path.join(pasta_saida, nome_arquivo)
     tamanho_ftp = None
 
@@ -164,12 +153,8 @@ def baixar_arquivo(ftp_dir: str, nome_arquivo: str, pasta_saida: str,
 def sincronizar_ftp(ftp_dir: str, output_dir: str, regra_filtro: Callable[[str], bool],
                      pasta_bucket: str | None = None,
                      verificar_ultimas_n_competencias: int = 2) -> tuple[bool, bool]:
-    """Retorna (sucesso, houve_novidade).
-
-    verificar_ultimas_n_competencias: cada checagem de tamanho abre uma
-    conexão FTP nova. Como o DATASUS só revisa competências recentes,
-    verifica de fato só as N mais recentes. Arquivos fora do manifesto
-    são sempre verificados.
+    """Otimização de rede: O DATASUS revisa apenas envios recentes. 
+    Limitar `verificar_ultimas_n_competencias` evita dezenas de conexões FTP inúteis para arquivos consolidados no manifesto.
     """
     ensure_output_dir(output_dir)
     logger.info(f"Conectando a {FTP_HOST} ({ftp_dir}) para listar arquivos...")

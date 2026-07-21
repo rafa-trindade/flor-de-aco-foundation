@@ -1,10 +1,7 @@
-"""Gera o manifesto de arquivos publicados no bucket.
+"""Geração de manifesto/índice (CSV) do bucket.
 
-Lê apenas o rodapé de metadados de cada Parquet -- não baixa o arquivo
-inteiro, o que importa quando a maior base passa de 3 milhões de linhas.
-
-O CSV resultante fica no bucket e serve de índice para quem consome:
-o que existe, de que fonte veio, quantos registros tem e quando mudou.
+Otimização de rede: A extração de metadados consome estritamente o 
+rodapé (footer) dos arquivos Parquet, evitando o download integral de bases.
 """
 import csv
 import logging
@@ -28,15 +25,12 @@ COLUNAS = [
     "arquivo",
     "diretorio",
     "fontes_relacionadas",
-    "observacoes",
     "num_registros",
     "num_colunas",
     "tamanho_bytes",
     "ultima_atualizacao",
 ]
 
-# Arquivos de controle interno: checkpoint do Datajud, manifesto de
-# sincronização do FTP e o próprio CSV gerado aqui.
 def _e_arquivo_de_controle(nome: str) -> bool:
     return (
         nome == NOME_ARQUIVO_SAIDA
@@ -45,22 +39,12 @@ def _e_arquivo_de_controle(nome: str) -> bool:
     )
 
 
-def _fontes_por_pasta() -> tuple[dict[str, str], dict[str, str]]:
-    """Nome e nota das fontes, agrupados por pasta do bucket.
-
-    Uma pasta pode ter mais de uma fonte (o datasus_sinan é uma só, mas
-    nada impede que outras compartilhem prefixo), daí a junção por ' | '.
-    """
+def _fontes_por_pasta() -> dict[str, str]:
+    """Nomes das fontes agrupados por pasta do bucket (separados por ' | ' em caso de colisão de prefixo)."""
     nomes = defaultdict(list)
-    notas = defaultdict(list)
     for f in FONTES:
         nomes[f.pasta_bucket].append(f.nome)
-        if getattr(f, "nota", None):
-            notas[f.pasta_bucket].append(f.nota)
-    return (
-        {pasta: " | ".join(v) for pasta, v in nomes.items()},
-        {pasta: " | ".join(v) for pasta, v in notas.items()},
-    )
+    return {pasta: " | ".join(v) for pasta, v in nomes.items()}
 
 
 def _montar_s3_filesystem() -> pafs.S3FileSystem:
@@ -76,11 +60,7 @@ def _montar_s3_filesystem() -> pafs.S3FileSystem:
 
 def _metadados_parquet(s3_fs: pafs.S3FileSystem, bucket: str,
                        key: str) -> tuple[int | None, int | None]:
-    """(num_registros, num_colunas) lidos do rodapé do Parquet.
-
-    O ParquetFile lê só o footer, então o custo independe do tamanho da
-    base -- é o que torna viável catalogar milhões de linhas.
-    """
+    """Retorna tupla (num_registros, num_colunas) consumindo exclusivamente o footer do arquivo."""
     try:
         pf = pq.ParquetFile(f"{bucket}/{key}", filesystem=s3_fs)
         return pf.metadata.num_rows, pf.metadata.num_columns
@@ -89,8 +69,7 @@ def _metadados_parquet(s3_fs: pafs.S3FileSystem, bucket: str,
         return None, None
 
 
-def gerar_linhas(s3_client, s3_fs, bucket: str,
-                 nomes: dict[str, str], notas: dict[str, str]) -> list[dict]:
+def gerar_linhas(s3_client, s3_fs, bucket: str, nomes: dict[str, str]) -> list[dict]:
     paginator = s3_client.get_paginator("list_objects_v2")
     linhas = []
 
@@ -111,7 +90,6 @@ def gerar_linhas(s3_client, s3_fs, bucket: str,
                 "arquivo": key,
                 "diretorio": pasta,
                 "fontes_relacionadas": nomes.get(pasta, "(não mapeado em fontes.py)"),
-                "observacoes": notas.get(pasta, ""),
                 "num_registros": num_registros,
                 "num_colunas": num_colunas,
                 "tamanho_bytes": obj["Size"],
@@ -128,20 +106,20 @@ def main() -> int:
         logger.error(f"Variáveis do MinIO ausentes: {', '.join(faltando)}")
         return exit_codes.ERRO
 
-    nomes, notas = _fontes_por_pasta()
+    nomes = _fontes_por_pasta()
     s3_client = get_s3_client()
     s3_fs = _montar_s3_filesystem()
 
     logger.info(f"Catalogando {env.MINIO_BUCKET}...")
-    linhas = gerar_linhas(s3_client, s3_fs, env.MINIO_BUCKET, nomes, notas)
+    linhas = gerar_linhas(s3_client, s3_fs, env.MINIO_BUCKET, nomes)
 
     if not linhas:
         logger.warning("Nenhum arquivo encontrado no bucket.")
         return exit_codes.SEM_NOVIDADE
 
     CAMINHO_LOCAL.parent.mkdir(parents=True, exist_ok=True)
-    # utf-8-sig para o Excel abrir os acentos corretamente sem
-    # configuração adicional.
+    
+    # Encoding utf-8-sig (BOM) garante parsing nativo de acentuação no Excel.
     with open(CAMINHO_LOCAL, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=COLUNAS)
         writer.writeheader()

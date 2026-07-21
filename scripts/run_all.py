@@ -1,24 +1,12 @@
-"""Orquestrador do pipeline: extract + process de todas as fontes.
+"""Orquestrador do pipeline (Extract -> Process -> Load).
 
-Sequencial de propósito: fontes que compartilham pasta_bucket também
-compartilham o _manifest.json, e gravá-lo em paralelo corrompe o controle
-de novidade.
+Regras de arquitetura e execução:
+- Execução sequencial: O paralelismo corrompe o `_manifest.json` em fontes que compartilham o mesmo `pasta_bucket`.
+- `process` só é acionado se o `extract` reportar dado novo (otimização de tempo).
+- `load` só é acionado automaticamente se houver novidade nas fontes automáticas. Para manuais, usar `--force-load`.
 
 Uso:
-    python -m scripts.run_all
-    python -m scripts.run_all --so datasus_sim,ibge
-    python -m scripts.run_all --pular datasus_sinan
-    python -m scripts.run_all --process-only
-    python -m scripts.run_all --force-load
-    python -m scripts.run_all --no-load
-
-Cada extract termina em um de três estados (ver scripts/common/exit_codes.py).
-O process só roda quando o extract reportou dado novo -- reprocessar o SIM
-inteiro sem necessidade custa dezenas de minutos.
-
-O load só roda quando alguma fonte AUTOMÁTICA trouxe novidade nesta execução.
-Fonte manual não tem como reportar isso: use --force-load depois de atualizar
-os arquivos em MANUAL_DIR.
+    python -m scripts.run_all [--so id1,id2] [--pular id1] [--process-only] [--force-load] [--no-load]
 """
 import argparse
 import importlib.util
@@ -42,11 +30,7 @@ LOAD_MODULES = [
 
 
 def validar_registro() -> list[str]:
-    """Módulos registrados em fontes.py que não existem.
-
-    Renomear um script sem atualizar o registro já quebrou 3 das 4 fontes
-    aqui; falhar no início é melhor que descobrir no meio da execução.
-    """
+    """Valida integridade do catálogo: Retorna módulos de fontes.py inexistentes no disco."""
     return [
         m
         for f in FONTES
@@ -56,10 +40,8 @@ def validar_registro() -> list[str]:
 
 
 def rodar_modulo(modulo: str) -> int:
-    """Roda em subprocess, como `python -m`.
-
-    Subprocess e não runpy: os scripts chamam sys.exit e configuram estado
-    global, o que num mesmo processo contamina as execuções seguintes.
+    """Executa módulo isolado via subprocess (`python -m`).
+    O isolamento previne que chamadas a `sys.exit` ou variáveis globais contaminem a orquestração.
     """
     print(f"\n[{modulo}]")
     return subprocess.run([sys.executable, "-m", modulo]).returncode
@@ -94,8 +76,7 @@ def rodar_fonte(fonte: Fonte, pular_extract: bool) -> dict:
         return {"id": fonte.id, "extract": extract, "process": exit_codes.SEM_NOVIDADE,
                 "novidade": False}
 
-    # Fonte manual e --process-only não têm como reportar novidade, então
-    # o process roda e decide sozinho (via manifesto) se há o que fazer.
+    # Fontes manuais e flag --process-only delegam ao próprio process a validação de novidade via manifesto.
     deve_processar = (
         extract == exit_codes.SUCESSO
         or not fonte.automatica

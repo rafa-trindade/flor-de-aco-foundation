@@ -1,18 +1,7 @@
-"""PNS/IBGE 2019 -- módulo de violência (bloco V).
+"""Mapeamento posicional PNS/IBGE 2019 (Bloco V - Violência).
 
-Posições, nomes e domínios extraídos do dicionário oficial
-(dicionario_pns_microdados_2019.xls).
-
-Estrutura diferente de 2013: em vez de separar violência por pessoa
-conhecida/desconhecida, 2019 pergunta por ato (psicológica, física,
-sexual) e identifica o agressor em cada bloco -- inclusive "Pessoa
-desconhecida" e "Policial". Por isso uma base só, com o agressor como
-coluna.
-
-2019 também pergunta violência sexual ALGUMA VEZ NA VIDA, além dos
-últimos 12 meses.
-
-Microdados de posição fixa em MANUAL_DIR (ver env.example).
+Mudança de schema (vs 2013): Agrupamento unificado por tipo de ato (psicológica, física, sexual), com o agressor mapeado como coluna.
+Regra de negócio: Inclui dados de série histórica estendida para violência sexual ("alguma vez na vida").
 """
 import sys
 
@@ -321,14 +310,14 @@ DOMINIOS = {
 
 
 def ajuste(df):
-    """Idade e peso vêm zero-preenchidos no layout posicional."""
+    """Correção de zero-fill em layout posicional (idade e peso amostral)."""
     df["idade"] = df["idade"].str.lstrip("0").replace("", "0")
     df["peso_amostral"] = pd.to_numeric(df["peso_amostral"], errors="coerce") / 10**8
     return df
 
 
 def preparar(df):
-    # 2019 usa "Mulher"; 2013 usa "Feminino"
+    # Fix de domínio: IBGE alterou a flag de 'Feminino' (2013) para 'Mulher' (2019).
     r = df[df["sexo"] == "Mulher"]
     r = r[r[COLUNAS_VIOLENCIA].eq("Sim").any(axis=1)]
     if r.empty:
