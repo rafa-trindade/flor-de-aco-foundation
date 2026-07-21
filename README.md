@@ -115,11 +115,15 @@ A API expõe apenas metadados processuais - classe, assunto, órgão julgador e 
 
 São publicados três recortes, do mais estrito ao mais amplo:
 
-| Recorte | Assuntos | Volume |
-|---|---|---|
-| `feminicidio` | Feminicídio (12091) | ~45 mil movimentações |
-| `violencia_genero` | + lesão por condição de mulher, violência psicológica, perseguição, descumprimento de protetiva | ~480 mil |
-| `contexto_domestico` | + marcadores transversais de violência doméstica | ~3 milhões |
+
+| Recorte | Assuntos | Movimentações | Processos |
+|---|---|---|---|
+| `feminicidio` | Feminicídio | ~45 mil | ~40 mil |
+| `violencia_genero` | + lesão em razão da condição de mulher, violência psicológica, perseguição e descumprimento de medida protetiva | ~420 mil | ~400 mil |
+| `contexto_domestico` | + marcadores transversais de violência doméstica | ~3 milhões | ~2.9 milhões |
+
+Os recortes são cumulativos: `contexto_domestico` contém `violencia_genero`, que por sua vez contém `feminicidio`. As colunas indicadoras (`TEM_FEMINICIDIO`, `TEM_MEDIDA_PROTETIVA`, `TEM_VIOLENCIA_TIPIFICADA`, `TEM_CONTEXTO_DOMESTICO`) permitem reproduzir qualquer subconjunto a partir da base mais ampla.
+
 
 **Bases disponibilizadas** (pasta `datajud/`):
 
