@@ -12,8 +12,7 @@ MINIO_BUCKET = os.environ.get("MINIO_BUCKET")
 KAGGLE_DIR = BASE_DIR / ".kaggle"
 KAGGLE_JSON = KAGGLE_DIR / "kaggle.json"
 
-# Sem isso, logger.info() dos módulos comuns não aparece quando um script
-# roda sozinho via python -m.
+# Garante saída no stdout ao executar scripts individualmente via python -m.
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -23,7 +22,7 @@ for _ruidoso in ("botocore", "boto3", "urllib3"):
 
 
 def validar_minio() -> list[str]:
-    """Nomes das variáveis obrigatórias do MinIO que estão faltando."""
+    """Retorna lista de variáveis obrigatórias ausentes."""
     obrigatorias = {
         "MINIO_ENDPOINT": MINIO_ENDPOINT,
         "MINIO_ROOT_USER": MINIO_ROOT_USER,

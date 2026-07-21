@@ -1,10 +1,9 @@
-"""Corrige bug do simpledbf: datas zeradas (00000000) quebram o parse.
+"""Monkey patch para `simpledbf.Dbf5`.
 
-Bug na lib: datetime.date(y, m, d) fica fora do try/except que trata
-valores inválidos -- ano 0 passa pelo int() sem erro, mas datetime.date
-rejeita. Sem correção oficial (github.com/rnelsonchem/simpledbf/issues/10).
+Corrige erro de parse com datas zeradas (00000000) encapsulando `datetime.date` no try/except.
+Issue original sem resolução: github.com/rnelsonchem/simpledbf/issues/10
 
-Aplica o patch importando este módulo antes de usar Dbf5.
+Importe este módulo antes de instanciar `Dbf5`.
 """
 import struct
 import datetime
@@ -52,8 +51,7 @@ def _get_recs_corrigido(self, chunk=None):
                         value = float('nan')
 
             elif typ == 'D':
-                # Correção: datetime.date(y, m, d) agora dentro do try --
-                # datas zeradas (00000000) viram NA em vez de quebrar tudo.
+
                 try:
                     y, m, d = int(value[:4]), int(value[4:6]), int(value[6:8])
                     value = datetime.date(y, m, d)

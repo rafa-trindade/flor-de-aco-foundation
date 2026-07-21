@@ -1,26 +1,15 @@
-"""Domínios dos campos categóricos da ficha VIOL (SINAN NET 5.0/Patch 5.1).
+"""Domínios categóricos da ficha VIOL (SINAN NET 5.0/Patch 5.1).
 
-Transcritos do "Dicionário de Dados -- SINAN NET -- Versão 5.0/Patch 5.1",
-Violência Interpessoal/Autoprovocada, revisado junho/2015.
-
-Duas divergências entre o PDF e o DBF, tratadas aqui:
-
-- ESCOLARIDADE: o PDF imprime "43 Analfabeto" seguido de "1. 1ª a 4ª série
-  incompleta...", deslocando toda a numeração visual. O código gravado no
-  DBF é 0 para Analfabeto e a sequência segue 1..10.
-- VIOLENCIA_MOTIVADA e LOCAL_OCORRENCIA: declarados varchar2(1) no PDF mas
-  com categorias de dois dígitos (88, 99). A largura efetiva varia entre
-  competências, daí as chaves com e sem zero à esquerda.
-
-O layout anterior a 2015 não tem IDENT_GEN, VIOL_MOTIV nem os DEF_*; nesses
-anos as colunas chegam ausentes e viram NULL no union_by_name.
+Tratamento de divergências entre Dicionário de Dados (PDF) e arquivos (DBF):
+- ESCOLARIDADE: 'Analfabeto' é o código '0' no DBF, divergindo do erro de impressão do PDF.
+- Largura variável: `VIOLENCIA_MOTIVADA` e `LOCAL_OCORRENCIA` mapeiam chaves com e sem zero à esquerda.
+- Esquema legado: Colunas pós-2015 (`IDENT_GEN`, `VIOL_MOTIV`, `DEF_*`) convertem para NULL em bases antigas via `union_by_name`.
 """
 
 # Domínio Sim/Não/Ignorado, repetido em dezenas de campos da ficha.
 SIM_NAO = {"1": "SIM", "2": "NAO", "9": "IGNORADO"}
 
-# Variante com "não se aplica", usada nos campos condicionais (violência
-# sexual, deficiências, procedimentos).
+# Usado em campos condicionais (ex: violência sexual, deficiências).
 SIM_NAO_NA = {"1": "SIM", "2": "NAO", "8": "NAO SE APLICA", "9": "IGNORADO"}
 
 SEXO = {"M": "MASCULINO", "F": "FEMININO", "I": "IGNORADO"}
@@ -122,9 +111,8 @@ SEXO_AGRESSOR = {
     "9": "IGNORADO",
 }
 
-# Campo 64. O DBF grava em CICL_VID; CICL_VID_AUTOR (nome do PDF) existe
-# no schema mas chega sempre nulo. Ler só o do PDF deixaria a coluna vazia
-# em silêncio -- o process usa COALESCE(CICL_VID, CICL_VID_AUTOR).
+# O nome do PDF (`CICL_VID_AUTOR`) existe no schema mas chega nulo.
+# O processamento exige `COALESCE(CICL_VID, CICL_VID_AUTOR)`.
 CICLO_VIDA_AGRESSOR = {
     "1": "CRIANCA",
     "2": "ADOLESCENTE",
@@ -144,10 +132,8 @@ UNIDADE_NOTIFICADORA = {
     "7": "OUTROS",
 }
 
-# Campo 61 -- relação com o provável autor. Multimarcação: a ficha permite
-# vários "Sim" na mesma notificação (campo 60 NUM_ENVOLV registra "dois ou
-# mais"). Vira LIST no Parquet, não coluna única -- não há vínculo
-# "principal" na ficha, e eleger um seria inventar hierarquia.
+# Vínculo com o autor. Campo de multimarcação (serializado como LIST no Parquet).
+# Regra de negócio: não hierarquizar ou forçar vínculo "principal".
 VINCULO_AGRESSOR = {
     "REL_PAI": "PAI",
     "REL_MAE": "MAE",
@@ -169,20 +155,16 @@ VINCULO_AGRESSOR = {
     "REL_OUTROS": "OUTROS",
 }
 
-# Subconjunto de VINCULO_AGRESSOR que caracteriza parceiro íntimo, atual ou
-# anterior. Base do recorte de violência por parceiro íntimo -- o critério
-# que o SIM não permite, por não haver relação vítima-agressor na DO.
+# Base do recorte de violência por parceiro íntimo (diferencial crucial em relação ao SIM).
 VINCULOS_PARCEIRO_INTIMO = [
     "REL_CONJ", "REL_EXCON", "REL_NAMO", "REL_EXNAM",
 ]
 
-# Vínculo familiar não-parceiro. Separado do íntimo porque o perfil de
-# violência intrafamiliar contra meninas é distinto do de parceiro.
+# Separado do parceiro íntimo devido ao perfil etário distinto (foco intrafamiliar).
 VINCULOS_FAMILIARES = [
     "REL_PAI", "REL_MAE", "REL_PAD", "REL_MAD", "REL_FILHO", "REL_IRMAO",
 ]
 
-# Campo 56 -- tipo de violência. Multimarcação, mesma lógica do campo 61.
 TIPO_VIOLENCIA = {
     "VIOL_FISIC": "FISICA",
     "VIOL_PSICO": "PSICOLOGICA/MORAL",
@@ -196,7 +178,6 @@ TIPO_VIOLENCIA = {
     "VIOL_OUTR": "OUTROS",
 }
 
-# Campo 57 -- meio de agressão. Multimarcação.
 MEIO_AGRESSAO = {
     "AG_FORCA": "FORCA CORPORAL/ESPANCAMENTO",
     "AG_ENFOR": "ENFORCAMENTO",
@@ -209,8 +190,7 @@ MEIO_AGRESSAO = {
     "AG_OUTROS": "OUTRO",
 }
 
-# Campo 58 -- natureza da violência sexual. Só preenchido quando
-# VIOL_SEXU=1; nos demais casos o sistema grava 8 (não se aplica).
+# Condicionado a VIOL_SEXU=1; outros casos recebem '8' (não se aplica).
 TIPO_VIOLENCIA_SEXUAL = {
     "SEX_ASSEDI": "ASSEDIO SEXUAL",
     "SEX_ESTUPR": "ESTUPRO",
@@ -219,15 +199,9 @@ TIPO_VIOLENCIA_SEXUAL = {
     "SEX_OUTRO": "OUTRO",
 }
 
-# Campo 65 -- encaminhamentos da rede. Multimarcação.
-#
-# Os nomes efetivos no DBF divergem do PDF em três pontos, verificados no
-# schema dos arquivos: REDE_SAU (o PDF diz ENC_SAUDE) e DELEG_IDOS (o PDF
-# diz DELEG_IDOSO). As duas grafias entram no mapa porque o layout varia
-# entre competências e a ausente vira NULL, sem efeito no list_filter.
-#
-# Não confundir com o bloco ENC_* legado (ENC_TUTELA, ENC_DEAM, ENC_IML
-# etc.), presente até ~2017 e substituído por estes campos.
+# Encaminhamentos de rede (multimarcação).
+# Ambas grafias (DBF vs PDF) mapeadas devido a variações de schema (`REDE_SAU`/`ENC_SAUDE`, `DELEG_IDOS`/`DELEG_IDOSO`).
+# Nota: substituiu o bloco de colunas legado `ENC_*` (~2017).
 ENCAMINHAMENTO = {
     "REDE_SAU": "REDE DA SAUDE",
     "ENC_SAUDE": "REDE DA SAUDE",
@@ -247,8 +221,6 @@ ENCAMINHAMENTO = {
     "DEFEN_PUBL": "DEFENSORIA PUBLICA",
 }
 
-# Campo 39 -- deficiências e transtornos. Multimarcação, condicionada a
-# DEF_TRANS=1.
 DEFICIENCIA = {
     "DEF_FISICA": "DEFICIENCIA FISICA",
     "DEF_MENTAL": "DEFICIENCIA INTELECTUAL",

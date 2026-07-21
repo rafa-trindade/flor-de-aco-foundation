@@ -1,7 +1,5 @@
-"""Registro das fontes: módulos de extract/process e pasta no bucket.
-
-pasta_bucket precisa bater com o valor usado nos scripts da fonte -- é
-onde ficam o Parquet publicado e o _manifest.json.
+"""Catálogo de fontes e módulos do pipeline.
+Nota: `pasta_bucket` define o destino obrigatório do Parquet e do _manifest.json.
 """
 from dataclasses import dataclass, field
 
@@ -108,7 +106,6 @@ def get_fonte(id: str) -> Fonte:
 
 
 def pastas_bucket() -> list[str]:
-    """Pastas distintas do bucket, na ordem de registro."""
     vistas = []
     for f in FONTES:
         if f.pasta_bucket not in vistas:

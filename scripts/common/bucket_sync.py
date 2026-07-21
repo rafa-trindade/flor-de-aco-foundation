@@ -1,8 +1,7 @@
-"""Acesso ao bucket e controle de novidade.
+"""Acesso ao S3/MinIO.
 
-O bucket é a fonte de verdade: nada fica persistido localmente após o
-upload. O manifesto cobre o caso de vários arquivos-fonte virarem um
-único output, onde não há chave 1-pra-1 no bucket para comparar.
+O bucket é a fonte da verdade (SSOT). O manifesto mapeia casos onde 
+múltiplos arquivos-fonte consolidam em um único output sem chave 1-pra-1.
 """
 import hashlib
 import json
@@ -20,7 +19,7 @@ _client = None
 
 
 def get_s3_client():
-    """Client S3 compartilhado (lazy, reaproveitado no processo)."""
+
     global _client
     if _client is None:
         faltando = env.validar_minio()
@@ -75,10 +74,8 @@ def _hash_local_md5(caminho: Path) -> str:
 
 def already_in_bucket(s3_key: str, tamanho_local_esperado: int | None = None,
                        caminho_local_para_hash: Path | None = None) -> bool:
-    """True se o bucket já tem esse arquivo equivalente ao local.
-
-    Só tamanho é suficiente quando a origem reporta tamanho confiável.
-    caminho_local_para_hash adiciona comparação de MD5.
+    """O tamanho é suficiente se a origem reportar metadados confiáveis.
+    Passar `caminho_local_para_hash` força uma validação estrita por MD5.
     """
     tamanho_remoto = _tamanho_remoto(s3_key)
     if tamanho_remoto is None:
@@ -95,7 +92,7 @@ def already_in_bucket(s3_key: str, tamanho_local_esperado: int | None = None,
 
 
 def upload_and_cleanup(caminho_local: Path, s3_key: str, apagar_local: bool = True) -> bool:
-    """Sobe e apaga a cópia local. apagar_local=False só para depuração."""
+    """Nota: apagar_local=False deve ser usado exclusivamente para depuração."""
     s3 = get_s3_client()
     logger.info(f"[UPLOAD] Enviando {s3_key} ...")
     try:
@@ -119,7 +116,7 @@ def _chave_manifesto(pasta_bucket: str) -> str:
 
 
 def carregar_manifesto(pasta_bucket: str) -> dict[str, int]:
-    """Manifesto da pasta (NOME_ARQUIVO_MAIUSCULO -> tamanho em bytes)."""
+    """Retorna o schema: dict[NOME_ARQUIVO_MAIUSCULO, tamanho_em_bytes]."""
     s3 = get_s3_client()
     try:
         resposta = s3.get_object(Bucket=env.MINIO_BUCKET, Key=_chave_manifesto(pasta_bucket))
@@ -132,7 +129,7 @@ def carregar_manifesto(pasta_bucket: str) -> dict[str, int]:
 
 
 def salvar_manifesto(pasta_bucket: str, manifesto: dict[str, int]):
-    """Regrava o manifesto -- chamar após publicar um output novo."""
+    """Deve ser chamado para atualizar o estado apenas após publicar um output novo."""
     s3 = get_s3_client()
     chave = _chave_manifesto(pasta_bucket)
     normalizado = {k.upper(): v for k, v in manifesto.items()}
@@ -146,7 +143,7 @@ def salvar_manifesto(pasta_bucket: str, manifesto: dict[str, int]):
 
 
 def listar_objetos(prefixo: str = "") -> dict[str, int]:
-    """Lista o bucket (chave -> tamanho). Usado pelo load e pelos metadados."""
+    """Retorna mapeamento: dict[s3_key, tamanho_em_bytes]."""
     s3 = get_s3_client()
     paginator = s3.get_paginator("list_objects_v2")
     objetos = {}

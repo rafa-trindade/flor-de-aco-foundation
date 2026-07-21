@@ -1,8 +1,4 @@
-"""Publicação de resultados no bucket, em Parquet.
-
-query_para_parquet para fontes transformadas via SQL,
-dataframe_para_parquet para as com parsing em pandas.
-"""
+"""Interface de consolidação e publicação de arquivos Parquet no S3."""
 import logging
 from pathlib import Path
 
@@ -19,7 +15,8 @@ THREADS = 4
 
 
 def conectar_duckdb():
-    """Conexão com temp_directory configurável (spill de consolidação)."""
+    """Configura conexão em memória garantindo diretório temporário 
+    para disk spill durante operações pesadas."""
     DUCKDB_TEMP_DIR.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(database=":memory:", config={
         "temp_directory": str(DUCKDB_TEMP_DIR),
@@ -36,7 +33,10 @@ def _caminho_temporario(pasta_bucket: str, nome_arquivo: str) -> Path:
 
 
 def query_para_parquet(query: str, pasta_bucket: str, nome_arquivo: str, con=None) -> bool:
-    """Roda a query no DuckDB, grava Parquet e publica no bucket."""
+    """Grava um DataFrame em Parquet e publica no bucket.
+
+    Publica mesmo vazio, mantendo o schema.
+    """
     fechar = False
     if con is None:
         con = conectar_duckdb()
@@ -64,10 +64,8 @@ def query_para_parquet(query: str, pasta_bucket: str, nome_arquivo: str, con=Non
 
 
 def dataframe_para_parquet(df, pasta_bucket: str, nome_arquivo: str) -> bool:
-    """Grava um DataFrame em Parquet e publica no bucket.
-
-    Publica mesmo vazio, mantendo o schema.
-    """
+    """Nota: DataFrames vazios são publicados intencionalmente para preservar o 
+    contrato de schema."""
     if df is None:
         logger.error(f"DataFrame nulo -- {nome_arquivo} não foi gerado.")
         return False

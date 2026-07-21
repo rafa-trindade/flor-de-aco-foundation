@@ -1,8 +1,7 @@
-"""Domínios dos campos categóricos do SIM/DATASUS.
+"""Domínios categóricos do SIM/DATASUS (Declaração de Óbito).
 
-Valores conforme a documentação da Declaração de Óbito. O código 9
-(Ignorado) existe na maioria dos campos e é mapeado explicitamente em vez
-de virar NULL -- "ignorado" é informação diferente de "ausente".
+Regra de negócio: O código '9' (Ignorado) é mapeado explicitamente e 
+NÃO deve ser convertido para NULL ("ignorado" difere de "ausente").
 """
 
 SEXO = {"1": "MASCULINO", "2": "FEMININO", "0": "IGNORADO", "9": "IGNORADO"}

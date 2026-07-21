@@ -1,33 +1,13 @@
-"""CNJ/Datajud -- processos judiciais de violência contra a mulher.
+"""Extração Datajud (CNJ) -- Metadados processuais (limitados a capa/movimentos, sem partes).
 
-Metadados processuais (capa e movimentos), não dados da vítima: a API não
-expõe partes. Mede judicialização e tramitação -- quantos processos, onde,
-em que fase --, complementando o SIM (óbito) e o SINAN (notificação).
-
-A API é lenta e limitada: ~10-30s por resposta, 429 em requisição
-sequencial, 504 em consulta cara, teto de 10.000 por página. Daí o
-checkpoint: a extração é retomável, e uma rodada interrompida continua de
-onde parou em vez de recomeçar.
-
-A consulta é fatiada por ano de ajuizamento: paginar milhares de
-registros numa sequência só faz o cluster percorrer cada vez mais do
-índice, e a rejeição cresce a cada página.
+Estratégia de extração devido à instabilidade da API (HTTP 429/504, teto de 10k):
+- Checkpoint via bucket para extração idempotente e retomável.
+- Fatiamento dinâmico (por data de ajuizamento) para forçar paginação rasa (shallow pagination) 
+  e reduzir rejeição de shards no cluster Elasticsearch do CNJ.
 
 Uso:
     python -m scripts.extract.datajud.fetch_datajud_violencia [recorte] [tribunais] [flags]
-
-    recorte:        feminicidio (padrão) | gravidade | amplo
-    tribunais:      lista separada por vírgula (padrão: todos os TJs)
-    --reset:        limpa checkpoint e NDJSON antes, forçando reextração
-    --incremental:  reconsulta só o ano corrente e o anterior, trazendo
-                    o que entrou desde a última rodada
-    --paralelismo=N tribunais simultâneos (padrão 4; use 1 para serial)
-
-    # carga inicial de um tribunal
-    python -m scripts.extract.datajud.fetch_datajud_violencia feminicidio tjgo
-
-    # atualização periódica
-    python -m scripts.extract.datajud.fetch_datajud_violencia feminicidio tjgo --incremental
+    Flags: --reset, --incremental, --paralelismo=N
 """
 import json
 import logging
@@ -51,74 +31,49 @@ logger = logging.getLogger(__name__)
 
 URL_BASE = "https://api-publica.datajud.cnj.jus.br"
 
-# Chave pública, publicada aberta na wiki do CNJ. Pode ser trocada pelo
-# CNJ a qualquer momento -- em 401, buscar a vigente em
-# https://datajud-wiki.cnj.jus.br/api-publica/acesso
+# Chave pública (Wiki CNJ). Em caso de HTTP 401, buscar a vigente 
+# em https://datajud-wiki.cnj.jus.br/api-publica/acesso.
 API_KEY = "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw=="
 
-# MANUAL_DIR, não LANDING_DIR: landing é scratch e sofre limpeza, e
-# reextrair custa horas contra uma API instável -- o NDJSON bruto é o
-# backup barato dessa coleta.
+# Persiste em MANUAL_DIR (e não LANDING_DIR efêmero) como backup bruto 
+# devido ao alto custo computacional da extração.
 OUTPUT_DIR = MANUAL_DIR / "datajud"
 PASTA_BUCKET = "datajud"
 
-# Registros por resposta. O teto da API é 10.000.
-#
-# 2.000 é meio-termo: o custo dominante da extração é o NÚMERO de
-# requisições (10-30s de resposta cada, mais pausa), não o tamanho delas
-# -- com 500, um tribunal de 90 mil precisava de 180 idas à API; com
-# 2.000 são 45. Páginas maiores podem sofrer mais rejeição de shard, e o
-# checkpoint salva por página, então uma falha custa mais trabalho
-# perdido: se o log mostrar muito descarte, baixar de novo.
+# Teto da API é 10k. 2.000 é o trade-off que minimiza idas 
+# (10-30s cada) sem forçar alta rejeição de shards.
 TAMANHO_PAGINA = 2_000
 
-# Pausa entre páginas no caso normal. O backoff cobre a rejeição quando
-# ela vem; pausar muito por precaução só alonga a extração -- o TJAC
-# rodou 11 fatias seguidas sem um único warning.
 PAUSA_ENTRE_PAGINAS = 2
 
-# Retry. A rejeição é por fila cheia no cluster, não throttling por
-# cliente: é aleatória, e esperar mais não aumenta a chance de passar.
-# Backoff longo só desperdiça tempo -- no TJGO, 85% do relógio foi espera
-# entre tentativas, não download. Espera curta com jitter (para não
-# sincronizar as retentativas) e mais tentativas rende muito mais.
+# Rejeição de API (429) reflete fila de cluster, não rate-limit por cliente. 
+# Backoff curto + jitter é mais eficaz.
 MAX_TENTATIVAS = 15
 ESPERA_RETRY = 4
 ESPERA_MAXIMA = 20
 
-# Tribunais extraídos ao mesmo tempo. Cada um é um índice distinto no
-# cluster, então não competem pelo mesmo shard. Subir demais aumenta a
-# fila do Elasticsearch (que é compartilhada) e o retorno cai; 4 é um
-# meio-termo conservador. Ajustável por --paralelismo N.
+# Paralelismo conservador (cada tribunal é um índice isolado, mas a fila do 
+# ES é compartilhada).
 PARALELISMO = 4
 
-# Contagem exata do Elasticsearch para em 10.000: acima disso
-# hits.total.relation vira "gte" e a validação de completude por fatia
-# deixa de funcionar. Fatia que passe disso é subdividida.
+# Limite hardcoded do Elasticsearch (hits.total.relation="gte" acima de 10k). 
+# Fatias excedentes sofrem subdivisão.
 TETO_CONTAGEM_EXATA = 10_000
 
-# Acima disso, a fatia residual é subdividida por @timestamp. Paginar
-# dezenas de milhares numa sequência só faz o cluster percorrer cada vez
-# mais do índice a cada página.
+# Teto para evitar deep pagination. A fatia residual é subdividida por 
+# @timestamp caso passe deste valor.
 LIMITE_FATIA = 20_000
 
-# @timestamp é a data de indexação no Datajud, instituído em 2020 pela
-# Resolução CNJ 331. Faixas anteriores viriam vazias.
+# Data de indexação via Resolução CNJ 331. Documentos anteriores não possuem 
+# este metadata confiável.
 ANO_INICIAL_TIMESTAMP = 2020
 
-# Anos do fatiamento. 2005 é o piso observado numa varredura dos 27 TJs
-# (agregação por faixa de dataAjuizamento sobre o assunto 12091): há
-# acervo anterior ao Datajud, carregado pelos tribunais na migração.
-#
-# Registros fora dessa faixa existem e são muitos -- 49% do TJSP, 40% do
-# TJRJ, 39% do TJAC --, com dataAjuizamento presente mas fora de qualquer
-# ano plausível. A fatia residual os captura; alargar a faixa não
-# resolveria, porque o valor é inválido, não antigo.
+# 2005 é o piso empírico migrado. Registros inválidos ou anômalos de data (comuns) 
+# vão intencionalmente para a fatia residual.
 ANO_INICIAL = 2005
 ANOS = list(range(ANO_INICIAL, datetime.now().year + 1))
 
-# Justiça estadual: é onde tramitam feminicídio e medida protetiva.
-# Trabalhista, eleitoral e federal ficam de fora do recorte.
+
 TRIBUNAIS_ESTADUAIS = [
     "tjac", "tjal", "tjam", "tjap", "tjba", "tjce", "tjdft", "tjes",
     "tjgo", "tjma", "tjmg", "tjms", "tjmt", "tjpa", "tjpb", "tjpe",
@@ -126,9 +81,7 @@ TRIBUNAIS_ESTADUAIS = [
     "tjse", "tjsp", "tjto",
 ]
 
-# Campos da capa. Movimentos ficam de fora: são dezenas por processo e
-# multiplicariam o volume -- viram fonte separada se a análise de
-# tramitação for necessária.
+# Exclui movimentos (tramitações) para evitar explosão exponencial do payload.
 CAMPOS = [
     "id", "tribunal", "numeroProcesso", "dataAjuizamento", "grau",
     "nivelSigilo", "classe", "assuntos", "orgaoJulgador", "formato",
@@ -136,17 +89,9 @@ CAMPOS = [
 ]
 
 
-# Ordenação da paginação. Precisa ser estável e ÚNICA entre páginas:
-# sem desempate único, search_after pula ou repete registros que
-# compartilham o mesmo valor de data.
-#
-# _id não serve como desempate -- o cluster do CNJ tem
-# indices.id_field_data.enabled desativado e devolve
-# "Fielddata access on the _id field is disallowed". numeroProcesso é
-# único por processo e agregável pelo subcampo .keyword.
-#
-# As duas últimas opções, sem desempate, são último recurso: funcionam,
-# mas podem perder registros com data repetida.
+# Ordenações com desempate determinístico (numeroProcesso.keyword). 
+# _id não pode ser usado (CNJ bloqueia fielddata). Ordenações sem 
+# desempate causam perdas/duplicatas na paginação.
 ORDENACOES = [
     [{"@timestamp": {"order": "asc"}}, {"numeroProcesso.keyword": {"order": "asc"}}],
     [{"dataHoraUltimaAtualizacao": {"order": "asc"}},
@@ -158,9 +103,6 @@ ORDENACOES = [
     [{"dataAjuizamento": {"order": "asc"}}],
 ]
 
-# Preenchido na primeira consulta bem-sucedida de cada tribunal. Cada
-# thread escreve só a própria chave, mas o lock evita corrida na
-# escrita do dict.
 _ordenacao_valida: dict[str, list] = {}
 _lock_ordenacao = threading.Lock()
 
@@ -170,11 +112,8 @@ def _chave_checkpoint(recorte: str) -> str:
 
 
 def carregar_checkpoint(recorte: str) -> dict:
-    """Estado da extração por tribunal: search_after e total já baixado.
-
-    Vive no bucket, não no disco: landing é scratch e sofre limpeza, e o
-    checkpoint precisa sobreviver entre sessões.
-    """
+    """Retorna estado da extração (search_after e totais baixados). Persiste no S3/MinIO 
+    para proteção contra expurgo de disco."""
     s3 = get_s3_client()
     try:
         resposta = s3.get_object(
@@ -185,9 +124,6 @@ def carregar_checkpoint(recorte: str) -> dict:
         return {}
 
 
-# O checkpoint é um arquivo só no bucket, e com tribunais em paralelo
-# várias threads o salvam ao mesmo tempo -- sem lock, uma sobrescreve o
-# progresso da outra e a rodada seguinte rebaixa o que já veio.
 _lock_checkpoint = threading.Lock()
 
 
@@ -203,22 +139,13 @@ def salvar_checkpoint(recorte: str, estado: dict):
 
 
 def _espera_retry(tentativa: int) -> float:
-    """Espera curta com jitter, crescendo devagar até um teto baixo.
-
-    O jitter evita que retentativas simultâneas (vários tribunais, ou
-    outros consumidores da API) batam no cluster no mesmo instante.
-    """
     base = min(ESPERA_RETRY * (1 + tentativa * 0.5), ESPERA_MAXIMA)
     return base + random.uniform(0, 3)
 
 
 def _consultar(tribunal: str, corpo: dict) -> dict | None:
-    """POST com retry. Devolve None quando esgota as tentativas.
-
-    429 (rate limit) e 504 (timeout do gateway) são esperados e tratados
-    com espera crescente. 401 significa chave trocada pelo CNJ -- aborta,
-    porque insistir não resolve.
-    """
+    """POST com backoff. Devolve None ao esgotar tentativas ou encontrar 
+    HTTP 400/401 (falha irrecuperável)."""
     url = f"{URL_BASE}/api_publica_{tribunal}/_search"
     cabecalho = {
         "Authorization": f"APIKey {API_KEY}",
@@ -230,11 +157,9 @@ def _consultar(tribunal: str, corpo: dict) -> dict | None:
             r = requests.post(url, headers=cabecalho, json=corpo, timeout=300)
             if r.status_code == 200:
                 dados = r.json()
-                # HTTP 200 não garante resposta completa: sob carga o
-                # Elasticsearch responde com parte dos shards e sinaliza
-                # em _shards.failed. Nesse caso tanto hits.total quanto os
-                # próprios registros vêm truncados, e o search_after
-                # avançaria por cima do buraco -- perda silenciosa.
+                # Alerta Elasticsearch: HTTP 200 sob carga pode retornar sucesso parcial 
+                # (_shards.failed). 
+                # Requer descarte e retry para evitar falha silenciosa de search_after.
                 shards = dados.get("_shards", {})
                 falhos = shards.get("failed", 0)
                 if falhos:
@@ -247,9 +172,6 @@ def _consultar(tribunal: str, corpo: dict) -> dict | None:
                     continue
                 return dados
             if r.status_code == 400:
-                # Query malformada: repetir não resolve, e o corpo da
-                # resposta traz o motivo -- sem ele o diagnóstico vira
-                # adivinhação.
                 logger.error(f"[{tribunal}] 400 -- query rejeitada: {r.text[:600]}")
                 return None
             if r.status_code == 401:
@@ -279,25 +201,11 @@ def _corpo_busca(codigos: list[int], apos: list | None, ordenacao: list,
                  fatia: str | None = None, residual: bool = False,
                  cobertas: list[str] | None = None,
                  filtro_extra: dict | None = None) -> dict:
-    """Query paginada por search_after, opcionalmente restrita a um período.
-
-    from/size trava em 10.000 no Elasticsearch; search_after não tem teto.
-
-    NAO_MULHER é excluído explicitamente: são casos em que a vítima não é
-    mulher, e o assunto pode aparecer junto de um código do recorte.
-
-    `fatia` é um prefixo de dataAjuizamento: '2024' pega o ano inteiro,
-    '202403' só março. O filtro por período existe para manter a
-    paginação rasa -- paginar dezenas de milhares numa sequência só faz o
-    cluster percorrer cada vez mais do índice a cada página, e a taxa de
-    rejeição cresce junto.
-
-    A comparação é de STRING, não de data: dataAjuizamento é keyword e
-    chega em três formatos ('20150729093223', '2016-07-15T...' e epoch).
-    Os dois primeiros começam pelo ano, então ordenam lexicograficamente.
-
-    residual=True inverte: pega o que não caiu em nenhuma fatia coberta --
-    data em formato divergente, ausente ou fora do intervalo.
+    """Constrói payload ES (search_after e range).
+    
+    Técnica: `dataAjuizamento` requer comparação lexicográfica estrita (tipo keyword misturando formatos).
+    Fatiamento restringe o cursor, forçando shallow pagination (mitiga timeout).
+    `residual=True` captura o esgoto lógico (inconsistências que escapam ao regex temporal base).
     """
     filtros = [{"terms": {"assuntos.codigo": codigos}}]
     excluir = [{"terms": {"assuntos.codigo": list(NAO_MULHER)}}]
@@ -308,8 +216,7 @@ def _corpo_busca(codigos: list[int], apos: list | None, ordenacao: list,
     elif fatia is not None:
         filtros.append({"range": {"dataAjuizamento": _intervalo(fatia)}})
 
-    # Subdivisão do residual por @timestamp, quando ele é grande demais
-    # para uma sequência só de search_after.
+
     if filtro_extra is not None:
         filtros.append(filtro_extra)
 
@@ -318,8 +225,6 @@ def _corpo_busca(codigos: list[int], apos: list | None, ordenacao: list,
         "_source": CAMPOS,
         "query": {"bool": {"filter": filtros, "must_not": excluir}},
         "sort": ordenacao,
-        # Sem isso hits.total para em 10.000 e vira "gte", e a validação
-        # de completude da fatia deixa de funcionar em tribunal grande.
         "track_total_hits": True,
     }
     if apos:
@@ -355,16 +260,7 @@ def _meses(ano: int) -> list[str]:
 
 
 def _descobrir_ordenacao(tribunal: str, codigos: list[int]) -> list | None:
-    """Primeira ordenação que o índice aceita.
-
-    Testada com size=1 para ser barata. Sem isso, um sort inválido só
-    apareceria como 400 no meio da paginação.
-
-    _consultar já distingue os casos: 400 (sort inválido) devolve None
-    imediatamente, enquanto 429/504 são retentados internamente. Então um
-    None aqui significa mesmo que a ordenação não serve -- e não que a
-    API estava ocupada no momento.
-    """
+    """Probe (size=1) para descobrir o sort de índice suportado (TJs não possuem schema rígido)."""
     if tribunal in _ordenacao_valida:
         return _ordenacao_valida[tribunal]
 
@@ -424,12 +320,8 @@ def _baixar_fatia(tribunal: str, codigos: list[int], fatia: str | None,
             registrar(False)
             return False, novos
 
-        # A contagem é relida a cada página e mantém-se a MAIOR observada.
-        # Ficar com a primeira arriscaria validar contra um número baixo:
-        # no TJGO a primeira página declarou 1.152 de um total de 2.359,
-        # porque veio de uma resposta com shards rejeitados.
-        # relation="gte" significa que passou do teto de contagem exata
-        # (10.000) e o número real só se conhece ao terminar de paginar.
+        # Fix/ES: hits.total subnotifica se o cluster dropar parcialidades. 
+        # Matém o teto alto (HWM) já visto.
         total = resposta.get("hits", {}).get("total", {})
         if total.get("relation") == "eq":
             valor = total.get("value")
@@ -455,10 +347,8 @@ def _baixar_fatia(tribunal: str, codigos: list[int], fatia: str | None,
                     + (f"/{esperado}" if esperado else "") + " registros...")
         registrar(False)
 
-        # Não encerrar por `len(hits) < TAMANHO_PAGINA`: sob carga o
-        # Elasticsearch devolve página parcial ao rejeitar shards, e ler
-        # isso como fim perde o resto em silêncio -- foi o que cortou o
-        # TJGO em 1.377 de 2.359. Só a página vazia encerra de verdade.
+        # Terminador estrito: Só encerra em len == 0 (len < TAMANHO_PAGINA é normal 
+        # via timeout de shard).
         time.sleep(PAUSA_ENTRE_PAGINAS)
 
     if esperado is not None and baixados < esperado:
@@ -499,21 +389,9 @@ def _contar_fatias(tribunal: str, codigos: list[int],
 
 
 def _descobrir_fatias(tribunal: str, codigos: list[int]) -> list[str] | None:
-    """Fatias a paginar, no menor grão que cada período exigir.
-
-    Duas armadilhas do Datajud moldam esta função:
-
-    1. A contagem exata do Elasticsearch para em 10.000 (relation="gte").
-       Sem track_total_hits, tribunal grande vira contagem cega.
-    2. A agregação por período degrada em silêncio sob volume -- no TJMG,
-       com 149 mil registros, reportou 2 fatias com dado e o resto zerado.
-       Não dá erro; devolve zeros.
-
-    Daí o desenho: a agregação orienta, mas nunca decide sozinha. O total
-    do tribunal (consulta barata e confiável) valida o que ela diz, e o
-    grão desce para mês SÓ nos anos que concentram volume -- aplicar
-    mensal aos 22 anos daria 264 consultas, a maioria vazia, quando o
-    acervo se concentra nos anos recentes.
+    """Calcula malha de fatiamento (mensal vs anual).
+    Fallback contra bug do Datajud onde agregações de alto volume retornam zeros (falha silenciosa).
+    Desce para a granularidade mensal exclusivamente em anos que esbarram nos limites do ES.
     """
     total = _total_declarado(tribunal, codigos, exato=False)
     if total is None:
@@ -525,9 +403,6 @@ def _descobrir_fatias(tribunal: str, codigos: list[int]) -> list[str] | None:
 
     por_ano = _contar_fatias(tribunal, codigos, [str(a) for a in ANOS])
 
-    # Agregação inútil (falhou, ou reportou tão pouco que não comporta o
-    # total): fatia por ano em toda a faixa, cego. Mais consultas que o
-    # necessário, mas nenhuma fatia gigante.
     soma = sum(por_ano.values()) if por_ano else 0
     if not por_ano or soma < total / 2:
         logger.warning(
@@ -545,8 +420,7 @@ def _descobrir_fatias(tribunal: str, codigos: list[int]) -> list[str] | None:
         if qtd < TETO_CONTAGEM_EXATA:
             fatias.append(ano)
             continue
-        # Ano concentra volume: desce para mês. Só aqui -- é o que evita
-        # as 264 consultas mensais em anos que têm dezenas de registros.
+        # Drill-down: fragmenta em meses unicamente onde o ano concentra volume.
         por_mes = _contar_fatias(tribunal, codigos, _meses(int(ano)))
         if por_mes and sum(por_mes.values()) >= qtd / 2:
             fatias.extend(m for m in sorted(por_mes) if por_mes[m])
@@ -565,20 +439,8 @@ def _descobrir_fatias(tribunal: str, codigos: list[int]) -> list[str] | None:
 
 def _fatias_residuais(tribunal: str, codigos: list[int], cobertas: list[str],
                       ordenacao: list) -> list[tuple[str, dict | None]]:
-    """Divide o residual em faixas de @timestamp quando ele for grande.
-
-    O residual concentra tudo que dataAjuizamento não classifica -- e na
-    prática isso é quase toda a base, porque o filtro por ano casa pouco.
-    No TJMG do recorte violencia_genero foram 149 mil registros numa
-    sequência única de search_after, com a paginação ficando mais lenta a
-    cada página.
-
-    @timestamp é gerado pelo CNJ na indexação, não pelo tribunal: está
-    sempre presente e é ordenável de verdade, ao contrário de
-    dataAjuizamento. Serve para partir o residual em blocos menores.
-
-    Devolve [(chave, filtro_extra)]. filtro_extra None = residual
-    inteiro, sem subdivisão.
+    """Subdivide a fatia residual ancorada em `@timestamp`.
+    Impede deep pagination nos casos onde o `dataAjuizamento` não ajuda (maior parte da base legada).
     """
     corpo = {
         "size": 0,
@@ -610,16 +472,7 @@ def _fatias_residuais(tribunal: str, codigos: list[int], cobertas: list[str],
 
 def baixar_tribunal(tribunal: str, codigos: list[int], recorte: str,
                     estado: dict, anos: list[int] | None = None) -> tuple[bool, int]:
-    """Baixa um tribunal, fatiando por ano de ajuizamento.
-
-    O fatiamento mantém a paginação rasa: cada ano tem poucas centenas de
-    registros, em vez de milhares numa única sequência de search_after
-    cada vez mais profunda -- que é o que fazia a taxa de rejeição do
-    cluster crescer página após página.
-
-    Devolve (concluiu, novos). NDJSON em append: uma queda no meio não
-    perde o que já veio, e o checkpoint retoma por fatia.
-    """
+    """Orquestra a extração persistindo em NDJSON via append mode para viabilizar checkpoint per-chunk."""
     info = estado.get(tribunal, {})
     if info.get("concluido"):
         logger.info(f"[{tribunal}] já concluído nesta extração, pulando.")
@@ -632,19 +485,13 @@ def baixar_tribunal(tribunal: str, codigos: list[int], recorte: str,
     if ordenacao is None:
         return False, 0
 
-    # Fatias por período, mais a residual: registros com dataAjuizamento
-    # em formato divergente, ausente ou fora da faixa não caem em nenhum
-    # período, e sem a residual sumiriam. Não é caso de borda -- no TJAC
-    # a residual trouxe 150 dos 245, mais que todos os anos somados.
     if anos is None:
         descobertas = _descobrir_fatias(tribunal, codigos)
         if descobertas is None:
             descobertas = [str(a) for a in ANOS]
 
-        # Se o grão mudou desde a última rodada, o checkpoint tem fatias
-        # de um esquema e o código calcula outro: as antigas nunca seriam
-        # concluídas e as novas rebaixariam o que já veio, duplicando no
-        # NDJSON. Avisa em vez de misturar em silêncio.
+        # Bloqueio arquitetural: Aborta se detectar alteração do schema 
+        # de fatias para evitar perdas/duplicatas.
         registradas = {
             k for k in info.get("fatias", {}) if not k.startswith("residual")
         }
@@ -680,16 +527,8 @@ def baixar_tribunal(tribunal: str, codigos: list[int], recorte: str,
 
     if tudo_ok:
         total = sum(f.get("baixados", 0) for f in info.get("fatias", {}).values())
-        # Conferência final contra a contagem que a API declara para o
-        # recorte inteiro. Foi essa comparação que revelou a paginação
-        # truncada e os registros fora da faixa de anos -- os dois
-        # passavam sem erro nenhum.
-        # Só na carga completa: no incremental apenas algumas fatias são
-        # reconsultadas e a soma naturalmente não bate com o total.
-        # exato=False usa track_total_hits, que devolve a contagem real
-        # mesmo acima de 10.000 -- sem isso a conferência de completude
-        # não funcionava nos tribunais grandes, justamente onde mais
-        # importa.
+        # Asserção de completude (ignorada em incrementais). Necessita de track_total_hits 
+        # bypassando o limite de 10k.
         declarado = _total_declarado(tribunal, codigos, exato=False) if anos is None else None
         if declarado is not None and total != declarado:
             logger.error(
@@ -710,13 +549,7 @@ def baixar_tribunal(tribunal: str, codigos: list[int], recorte: str,
 
 def _total_declarado(tribunal: str, codigos: list[int],
                      exato: bool = True) -> int | None:
-    """Contagem que a API informa para o recorte inteiro, sem paginar.
-
-    exato=True devolve None quando a contagem vem truncada no teto de
-    10.000 (relation="gte"), porque aí não serve para conferir
-    completude. exato=False devolve o valor mesmo truncado, que é o
-    suficiente para dimensionar o grão do fatiamento.
-    """
+    """Extrai hits.total da query base. `exato=False` aciona flag `track_total_hits=True`."""
     corpo = {
         "size": 0,
         "query": {"bool": {
@@ -725,8 +558,6 @@ def _total_declarado(tribunal: str, codigos: list[int],
         }},
     }
     if not exato:
-        # track_total_hits remove o teto de 10.000 e devolve a contagem
-        # real -- mais caro, mas é uma consulta por tribunal.
         corpo["track_total_hits"] = True
 
     resposta = _consultar(tribunal, corpo)
@@ -739,12 +570,7 @@ def _total_declarado(tribunal: str, codigos: list[int],
 
 
 def resetar(recorte: str, tribunais: list[str], estado: dict):
-    """Limpa checkpoint e NDJSON dos tribunais indicados.
-
-    Necessário depois de corrigir um bug de extração: sem isso o tribunal
-    fica marcado como concluído e é pulado, e o NDJSON antigo continuaria
-    no disco, misturando dado velho com novo no append.
-    """
+    """Evita poluição e duplicação resetando checkpoints em bucket e logs em disco."""
     for tribunal in tribunais:
         estado.pop(tribunal, None)
         arquivo = OUTPUT_DIR / recorte / f"{tribunal}.ndjson"
@@ -782,12 +608,7 @@ def main(argv: list[str]) -> int:
 
     anos = None
     if incremental:
-        # Só o ano corrente e o anterior: processo novo entra no ano
-        # atual, e revisão de processo recente ainda pode chegar. Anos
-        # antigos não mudam o bastante para justificar reconsulta.
-        #
-        # As fatias desses anos são reabertas para que o search_after
-        # salvo continue de onde parou, trazendo só o que entrou depois.
+        # Delta mode: zera completion status das fatias dos últimos dois anos.
         anos = [datetime.now().year - 1, datetime.now().year]
         logger.info(f"Modo incremental: reconsultando {anos}.")
         for tribunal in tribunais:
@@ -803,10 +624,7 @@ def main(argv: list[str]) -> int:
     houve_falha = False
 
     if PARALELISMO > 1 and len(tribunais) > 1:
-        # Cada tribunal é um índice diferente no Elasticsearch, então
-        # rodar vários em paralelo não disputa o mesmo shard. Os 429 que
-        # a API devolve são de fila do cluster, não throttling por
-        # cliente -- por isso o paralelismo ajuda em vez de piorar.
+        
         logger.info(f"Extraindo {PARALELISMO} tribunais em paralelo.")
         with ThreadPoolExecutor(max_workers=PARALELISMO) as pool:
             futuros = {

@@ -1,13 +1,11 @@
-"""CID-10, grupo X85-Y09 (Agressões), Capítulo XX.
+"""Mapeamento CID-10: Capítulo XX, grupo X85-Y09 (Agressões).
 
-Os 3 primeiros caracteres definem o método; o 4º subdivide por LOCAL de
-ocorrência, exceto em Y06/Y07, onde subdivide por AGRESSOR.
-
-Y35 (intervenção legal) não pertence ao grupo -- a CID-10 o lista como
-exclusão de X85-Y09.
+Regras de negócio:
+- Caracteres 1-3: Método da agressão.
+- Caractere 4: Local da ocorrência (exceção: Y06/Y07 subdividem por agressor).
+- Exceção médica: Y35 (intervenção legal) é formalmente excluído deste grupo pela CID-10.
 """
 
-# 3 primeiros caracteres -> método da agressão
 CID_METODO = {
     "X85": "Agressão por meio de drogas, medicamentos e substâncias biológicas",
     "X86": "Agressão por meio de substâncias corrosivas",
@@ -36,7 +34,6 @@ CID_METODO = {
     "Y09": "Agressão por meios não especificados",
 }
 
-# 4º caractere na maioria das categorias
 CID_LOCAL = {
     "0": "Residência",
     "1": "Habitação coletiva",
@@ -50,7 +47,6 @@ CID_LOCAL = {
     "9": "Local não especificado",
 }
 
-# 4º caractere em Y06 e Y07
 CID_AGRESSOR = {
     "0": "Esposo ou companheiro",
     "1": "Pais",
@@ -62,7 +58,6 @@ CID_AGRESSOR = {
 
 CATEGORIAS_SUBDIVIDIDAS_POR_AGRESSOR = {"Y06", "Y07"}
 
-# Subcategorias que existem de fato em cada categoria
 _SUFIXOS_LOCAL = list(CID_LOCAL.keys())
 _SUFIXOS_AGRESSOR_Y06 = ["0", "1", "2", "8", "9"]
 _SUFIXOS_AGRESSOR_Y07 = ["0", "1", "2", "3", "8", "9"]
@@ -76,9 +71,8 @@ def _sufixos_validos(categoria: str) -> list[str]:
     return _SUFIXOS_LOCAL
 
 
-# Todos os códigos de 4 caracteres válidos do grupo -- usado no filtro.
-# Inclui também os de 3 caracteres: o SIM às vezes registra a categoria
-# sem a subdivisão.
+# Inclui intencionalmente os códigos de 3 caracteres: 
+# o banco de dados do SIM frequentemente omite a subdivisão.
 CODIGOS_AGRESSAO: set[str] = set(CID_METODO.keys())
 for _cat in CID_METODO:
     for _suf in _sufixos_validos(_cat):
@@ -86,10 +80,9 @@ for _cat in CID_METODO:
 
 
 def decompor(codigo: str) -> tuple[str | None, str | None, str | None]:
-    """(metodo, local, agressor) a partir do CAUSABAS.
+    """Retorna tupla (metodo, local, agressor).
 
-    Devolve (None, None, None) se o código não for do grupo de agressões.
-    local e agressor são mutuamente exclusivos -- depende da categoria.
+    Nota: `local` e `agressor` são mutuamente exclusivos com base na categoria.
     """
     if not codigo:
         return None, None, None
