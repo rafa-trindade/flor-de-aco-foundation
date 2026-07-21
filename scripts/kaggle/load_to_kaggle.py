@@ -1,152 +1,244 @@
+import os
 import json
-import shutil
 import logging
+import boto3
 from pathlib import Path
 from datetime import datetime
+from botocore.exceptions import ClientError
+
+from scripts.common.paths import BASE_DIR, PUBLISH_CACHE_DIR
+from scripts.common import env
+
+# Kaggle usa tempfile.mkdtemp() internamente (respeita TEMP/TMP, não .env)
+# Necessário pra evitar encher disco C: com zips grandes
+_temp_dir_kaggle = PUBLISH_CACHE_DIR.parent / "_temp_zip"
+_temp_dir_kaggle.mkdir(parents=True, exist_ok=True)
+os.environ['TEMP'] = str(_temp_dir_kaggle)
+os.environ['TMP'] = str(_temp_dir_kaggle)
+
+# ------------------- Kaggle -------------------
+KAGGLE_DIR = env.KAGGLE_DIR
+KAGGLE_JSON = env.KAGGLE_JSON
+
+os.environ['KAGGLE_CONFIG_DIR'] = str(KAGGLE_DIR)
+if KAGGLE_JSON.exists():
+    os.chmod(KAGGLE_JSON, 0o600)
+
 from kaggle.api.kaggle_api_extended import KaggleApi
 
-from scripts.common.paths import BASE_DIR, DATA_DIR
-
+# -----------------------------
+# Logging
+# -----------------------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ======================================================================
-# CONFIG
-# ======================================================================
+# -----------------------------
+# Configurações MinIO 
+# -----------------------------
+MINIO_ENDPOINT = env.MINIO_ENDPOINT
+if MINIO_ENDPOINT == "http://minio:9000":
+    MINIO_ENDPOINT = "http://localhost:9000"
 
-KAGGLE_JSON_PATH = BASE_DIR / ".kaggle" / "kaggle.json"
+MINIO_ACCESS_KEY = env.MINIO_ROOT_USER
+MINIO_SECRET_KEY = env.MINIO_ROOT_PASSWORD
+MINIO_BUCKET = env.MINIO_BUCKET
+
 DATASET_NAME = 'feminicidio-br'
+DATASET_TITLE = 'feminicidio-br'
+FILES_TO_IGNORE = {'.gitkeep', 'raw_lake_metadados.csv'}
 
-# ------------------------------------------------------------------
-# FONTES
-# ------------------------------------------------------------------
-# Derivado do registro central em scripts/config/fontes.py -- adicionar uma
-# fonte nova não exige mais editar esta lista manualmente, só a entrada em
-# FONTES lá no registro.
-from scripts.config.fontes import FONTES
+CACHE_DIR = PUBLISH_CACHE_DIR
 
-FONTES_PARA_ENVIAR: list[tuple[str, str, str]] = [
-    (m.pasta_origem, m.padrao, m.pasta_kaggle)
-    for fonte in FONTES
-    for m in fonte.kaggle
-]
+# ----------------------------
+# S3 / MinIO Client
+# ----------------------------
+def criar_s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+    )
 
-
-# ======================================================================
-# Preparação da pasta de upload
-# ======================================================================
-
-def preparar_pasta_dataset(data_dir: Path, fontes: list[tuple[str, str, str]]) -> Path:
-    """Varre `fontes` e copia os arquivos encontrados para uma pasta
-    temporária de upload, preservando a separação por diretório (cada
-    fonte cai na sua subpasta dentro do dataset do Kaggle)."""
-    temp_folder = data_dir / "upload_tmp"
-    if temp_folder.exists():
-        shutil.rmtree(temp_folder)
-    temp_folder.mkdir(parents=True, exist_ok=True)
-
-    total_copiados = 0
-    for idx, (pasta_origem, padrao, subpasta_kaggle) in enumerate(fontes, 1):
-        origem_dir = data_dir / pasta_origem
-        destino_dir = temp_folder / subpasta_kaggle
-        destino_dir.mkdir(parents=True, exist_ok=True)
-
-        arquivos = sorted(origem_dir.glob(padrao)) if origem_dir.exists() else []
-        if not arquivos:
-            logger.warning(f"[{idx}/{len(fontes)}] Nenhum arquivo '{padrao}' encontrado em '{origem_dir}', pulando.")
-            continue
-
-        logger.info(f"[{idx}/{len(fontes)}] {origem_dir} ({padrao}) -> {destino_dir.relative_to(temp_folder)} [{len(arquivos)} arquivo(s)]")
-        for src in arquivos:
-            try:
-                dst = destino_dir / src.name
-                shutil.copy2(src, dst)
-                total_copiados += 1
-            except Exception as e:
-                logger.error(f"❌ Falha ao copiar '{src}': {e}")
-
-    logger.info(f"Total de arquivos copiados: {total_copiados}")
-    return temp_folder
-
-
-def gerar_metadata(temp_folder: Path, dataset_id: str) -> Path:
-    """Gera o dataset-metadata.json exigido pela API do Kaggle."""
-    metadata_path = temp_folder / "dataset-metadata.json"
-    metadata = {
-        "id": dataset_id,
-        "licenses": [{"name": "CC0-1.0"}],
-        "resources": [],
-        "version": datetime.now().strftime("%Y%m%d"),
-    }
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f, indent=4)
-    logger.info(f"Metadata criado em: {metadata_path}")
-    return metadata_path
-
-
-# ======================================================================
-# Orquestração
-# ======================================================================
-
-def load_raw_to_kaggle():
-    """Cria ou atualiza o dataset público no Kaggle apenas com os
-    arquivos encontrados via FONTES_PARA_ENVIAR."""
-    with open(KAGGLE_JSON_PATH) as f:
-        kaggle_creds = json.load(f)
-    dataset_id = f"{kaggle_creds['username']}/{DATASET_NAME}"
-
-    logger.info(f"Iniciando o carregamento para o Kaggle: {dataset_id}")
-
+# ----------------------------
+# Main Process
+# ----------------------------
+def load_lake_to_kaggle():
+    logger.info("Autenticando na API do Kaggle...")
     api = KaggleApi()
     api.authenticate()
-
-    # ---------------------------------------------------------
-    # FASE 1: Descobrir e copiar os arquivos para a pasta de upload
-    # ---------------------------------------------------------
-    temp_folder = preparar_pasta_dataset(DATA_DIR, FONTES_PARA_ENVIAR)
-    gerar_metadata(temp_folder, dataset_id)
-
-    # ---------------------------------------------------------
-    # FASE 2: Criar ou atualizar o dataset no Kaggle
-    # ---------------------------------------------------------
+    
+    kaggle_user = api.get_config_value('username')
+    dataset_id = f"{kaggle_user}/{DATASET_NAME}"
+    
+    logger.info(f"Conectando ao Data Lake (MinIO) no bucket: {MINIO_BUCKET}")
+    s3_client = criar_s3_client()
+    
+    paginator = s3_client.get_paginator('list_objects_v2')
+    objetos_s3 = {}  # {chave: tamanho}
+    
     try:
-        try:
-            api.dataset_list_files(dataset_id)
-            dataset_existe = True
-            logger.info(f"Dataset {dataset_id} já existe. Tentando atualizar...")
-        except Exception as e:
-            if "404 - Not Found" in str(e):
-                dataset_existe = False
-                logger.info(f"Dataset {dataset_id} não existe. Tentando criar...")
-            else:
-                raise
+        for page in paginator.paginate(Bucket=MINIO_BUCKET):
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    caminho_obj = Path(obj['Key'])
+                    # Ignora arquivos da lista exata e qualquer arquivo com extensão .json
+                    if caminho_obj.name not in FILES_TO_IGNORE and caminho_obj.suffix.lower() != '.json':
+                        objetos_s3[obj['Key']] = obj['Size']
+    except ClientError as e:
+        logger.error(f"Erro ao acessar o MinIO: {e}")
+        return
 
-        if dataset_existe:
+    if not objetos_s3:
+        logger.warning(f"Nenhum arquivo encontrado no bucket {MINIO_BUCKET}. Encerrando.")
+        return
+
+    logger.info(f"Cache persistente: {CACHE_DIR}")
+
+    # Baixa só o que é novo ou mudou de tamanho desde a última
+    # publicação -- reaproveita o que já está no cache local
+    baixados = 0
+    reaproveitados = 0
+    for s3_key, tamanho_remoto in objetos_s3.items():
+        destino = CACHE_DIR / s3_key
+        if destino.exists() and destino.stat().st_size == tamanho_remoto:
+            reaproveitados += 1
+            continue
+
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Baixando do Lake (novo/alterado): {s3_key}")
+        s3_client.download_file(MINIO_BUCKET, s3_key, str(destino))
+        baixados += 1
+
+    logger.info(f"✔ {baixados} arquivo(s) baixado(s), {reaproveitados} reaproveitado(s) do cache local.")
+
+    # Limpa do cache local qualquer arquivo que não existe mais no
+    # bucket (evita publicar dado obsoleto/removido na origem).
+    # Exclui os arquivos de controle nossos (não vêm do bucket, não
+    # devem nunca ser tratados como órfãos).
+    ARQUIVOS_DE_CONTROLE = {"dataset-metadata.json", ".ultima_publicacao_sucesso"}
+    chaves_esperadas = set(objetos_s3.keys())
+    removidos = 0
+    for caminho_local in CACHE_DIR.rglob("*"):
+        if caminho_local.is_file():
+            chave_relativa = str(caminho_local.relative_to(CACHE_DIR)).replace(os.sep, "/")
+            if chave_relativa not in ARQUIVOS_DE_CONTROLE and chave_relativa not in chaves_esperadas:
+                caminho_local.unlink()
+                removidos += 1
+    if removidos:
+        logger.info(f"✔ {removidos} arquivo(s) órfão(s) removido(s) do cache (não existem mais no bucket).")
+
+    # Arquivo marcador confirma que última publicação terminou (protege contra retry de falhas)
+    marcador_sucesso = CACHE_DIR / ".ultima_publicacao_sucesso"
+
+    # Invalida marcador se cache mudou (novo/removido) nessa execução
+    if (baixados > 0 or removidos > 0) and marcador_sucesso.exists():
+        marcador_sucesso.unlink()
+
+    ultima_publicacao_ok = marcador_sucesso.exists()
+
+    if baixados == 0 and removidos == 0 and ultima_publicacao_ok:
+        logger.info("Nenhuma novidade real desde a última publicação -- pulando o envio ao Kaggle.")
+        return
+    elif baixados == 0 and removidos == 0 and not ultima_publicacao_ok:
+        logger.info("Cache já está atualizado, mas a última tentativa de publicação não terminou "
+                     "com sucesso (sem marcador) -- publicando mesmo assim, pra garantir.")
+
+    metadata_path = CACHE_DIR / "dataset-metadata.json"
+
+    # Checa se o dataset já existe ANTES de decidir o metadata --
+    # se existir, tenta preservar tags/subtítulo/descrição já
+    # configurados manualmente no Kaggle, em vez de sobrescrever
+    # com um metadata mínimo do zero (bug identificado: isso
+    # apagava configurações manuais a cada publicação).
+    try:
+        api.dataset_list_files(dataset_id)
+        dataset_exists = True
+        logger.info(f"Dataset {dataset_id} encontrado. Iniciando atualização da versão...")
+    except Exception as e:
+        erro_str = str(e)
+        if "404" in erro_str or "403" in erro_str:
+            dataset_exists = False
+            logger.info(f"Dataset {dataset_id} não existe ou é privado. Criando novo dataset...")
+        else:
+            raise
+
+    metadata = None
+    if dataset_exists:
+        logger.info("Baixando metadados existentes para preservar tags/subtítulo/descrição configurados manualmente...")
+        try:
+            api.dataset_metadata(dataset_id, path=str(CACHE_DIR))
+            with open(metadata_path, "r") as m:
+                metadata = json.load(m)
+
+            # Trata JSON com dupla codificação (quirk da API Kaggle)
+            if isinstance(metadata, str):
+                logger.info("Metadata veio com codificação JSON dupla (bug conhecido da API) -- desembrulhando...")
+                metadata = json.loads(metadata)
+
+            if not isinstance(metadata, dict):
+                raise TypeError(f"Metadata existente não é um dict mesmo após desembrulhar (veio como {type(metadata).__name__}).")
+
+            metadata["id"] = dataset_id  # garante que está certo, independente do que veio
+            metadata["resources"] = []  # API redetecta arquivos do cache
+
+            logger.info("✔ Metadados existentes preservados com sucesso.")
+        except Exception as e:
+            logger.warning(f"Não consegui baixar metadados existentes ({e}) -- "
+                            f"usando metadata mínimo. Tags/subtítulo/descrição configurados "
+                            f"manualmente podem ser perdidos nesta publicação.")
+
+    if metadata is None:
+        # Primeira publicação ou fallback se download falhou
+        metadata = {
+            "title": DATASET_TITLE,
+            "id": dataset_id,
+            "licenses": [{"name": "CC0-1.0"}],
+            "resources": [],
+        }
+
+    with open(metadata_path, "w") as m:
+        json.dump(metadata, m, indent=4)
+        m.flush()
+        os.fsync(m.fileno())
+
+    # Validação: garante metadata válido (erro mais claro que o do Kaggle)
+    with open(metadata_path, "r") as m:
+        conteudo_verificado = json.load(m)
+    if not isinstance(conteudo_verificado, dict):
+        raise TypeError(
+            f"dataset-metadata.json foi escrito, mas não é um objeto JSON válido "
+            f"(veio como {type(conteudo_verificado).__name__}): {conteudo_verificado!r}"
+        )
+    logger.info(f"✔ dataset-metadata.json validado ({len(conteudo_verificado)} campo(s)).")
+
+    logger.info("Metadata gerado. Iniciando comunicação com o Kaggle...")
+
+    try:
+        if dataset_exists:
             api.dataset_create_version(
-                folder=str(temp_folder),
-                version_notes=f"Update {datetime.now().strftime('%Y-%m-%d')} - New version",
+                folder=str(CACHE_DIR),
+                version_notes=f"Automated Lake Sync - {datetime.now().strftime('%Y-%m-%d')}",
                 delete_old_versions=True,
-                dir_mode="zip",
                 quiet=False,
+                dir_mode='zip'
             )
-            logger.info(f"✅ Dataset {dataset_id} atualizado com sucesso!")
+            logger.info(f"✔ Dataset {dataset_id} atualizado com sucesso!")
         else:
             api.dataset_create_new(
-                folder=str(temp_folder),
+                folder=str(CACHE_DIR),
                 public=True,
-                dir_mode="zip",
                 quiet=False,
+                dir_mode='zip'
             )
-            logger.info(f"✅ Dataset {dataset_id} criado com sucesso!")
+            logger.info(f"✔ Dataset {dataset_id} criado com sucesso!")
+
+        # Marcador só escrito se publicação terminou (retry automático em falhas)
+        marcador_sucesso.write_text(datetime.now().isoformat())
 
     except Exception as e:
-        logger.error(f"❌ Erro ao interagir com o Kaggle: {e}")
+        logger.error(f"❌ Erro na API do Kaggle: {e}")
         raise
-    finally:
-        if temp_folder.exists():
-            shutil.rmtree(temp_folder)
-            logger.info(f"Pasta temporária '{temp_folder}' removida.")
-
 
 if __name__ == "__main__":
-    load_raw_to_kaggle()
+    load_lake_to_kaggle()
