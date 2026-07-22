@@ -23,7 +23,6 @@ dbt/logs/
 *.parquet
 *PNS_2013.txt
 *PNS_2019.txt
-*.csv
 *.xls
 *.xlsx
 

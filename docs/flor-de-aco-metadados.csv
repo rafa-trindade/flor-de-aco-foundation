@@ -1,0 +1,20 @@
+﻿arquivo,diretorio,fontes_relacionadas,num_registros,num_colunas,tamanho_bytes,ultima_atualizacao
+datajud/datajud_contexto_domestico.parquet,datajud,CNJ/Datajud -- processos de violência contra a mulher,3067563,28,160212590,2026-07-21 17:58:49
+datajud/datajud_feminicidio.parquet,datajud,CNJ/Datajud -- processos de violência contra a mulher,45089,27,2666771,2026-07-21 13:46:37
+datajud/datajud_violencia_genero.parquet,datajud,CNJ/Datajud -- processos de violência contra a mulher,499862,27,27667755,2026-07-21 14:00:17
+datasen/pn_violencia_domestica_2005.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),815,26,39267,2026-07-20 15:07:16
+datasen/pn_violencia_domestica_2007.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),797,22,34435,2026-07-20 15:07:17
+datasen/pn_violencia_domestica_2009.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),827,69,106097,2026-07-20 15:07:19
+datasen/pn_violencia_domestica_2011.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),1352,67,108349,2026-07-20 15:07:20
+datasen/pn_violencia_domestica_2013.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),1248,66,101353,2026-07-20 15:07:20
+datasen/pn_violencia_domestica_2015.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),1102,66,96000,2026-07-20 15:07:21
+datasen/pn_violencia_domestica_2017.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),1116,91,136333,2026-07-20 15:07:22
+datasen/pn_violencia_domestica_2019.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),2400,124,234169,2026-07-20 15:07:24
+datasen/pn_violencia_domestica_2021.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),3000,103,260908,2026-07-20 15:07:25
+datasen/pn_violencia_domestica_2023.parquet,datasen,DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD),21787,118,1182488,2026-07-20 15:07:32
+datasus_sim/proxy_sim_feminicidio.parquet,datasus_sim,SIM/DATASUS -- óbitos femininos por agressão (CID-10 X85-Y09),118169,18,2026056,2026-07-20 15:05:06
+datasus_sinan/sinan_violencia_mulher.parquet,datasus_sinan,SINAN/DATASUS -- violência interpessoal contra mulheres (ficha VIOL),2814808,46,63440744,2026-07-20 23:31:14
+ibge/pns_proxy_violencia_desconhecido_2013.parquet,ibge,PNS/IBGE -- mulheres vítimas de violência (2013 e 2019),1042,20,37130,2026-07-20 20:52:52
+ibge/pns_violencia_domestica_2013.parquet,ibge,PNS/IBGE -- mulheres vítimas de violência (2013 e 2019),1197,22,42934,2026-07-20 20:52:52
+ibge/pns_violencia_domestica_2019.parquet,ibge,PNS/IBGE -- mulheres vítimas de violência (2013 e 2019),10881,35,257286,2026-07-20 20:53:31
+macroregiao/geo_macroregiao.parquet,macroregiao,Macrorregião e Região de Saúde (Ministério da Saúde),5570,17,276371,2026-07-20 04:26:38
