@@ -23,7 +23,7 @@ FONTES: list[Fonte] = [
         automatica=True,
         extract_modules=["scripts.extract.macroregiao.fetch_macroregiao_de_saude"],
         process_modules=["scripts.process.macroregiao.process_macroregiao_de_saude"],
-        nota="Precisa de macro_geolocalizacao.xls em MANUAL_DIR/macroregiao/.",
+        nota="Dependência manual: requer o arquivo `macro_geolocalizacao.xls` salvo no diretório env `FLOR_DE_ACO_MANUAL_DIR`.",
     ),
     Fonte(
         id="datasus_sim",
@@ -33,9 +33,9 @@ FONTES: list[Fonte] = [
         extract_modules=["scripts.extract.datasus.fetch_sim_causas_externas"],
         process_modules=["scripts.process.datasus.process_proxy_sim_feminicidio"],
         nota=(
-            "Extract via FTP -- pode falhar em VPS com porta 21 bloqueada. "
-            "Nesse caso use SOCKS5_PROXY_ENABLED=true (ver base_ftp.py) ou "
-            "rode o extract localmente."
+            "A extração via FTP pode falhar em servidores VPS com a porta 21 bloqueada. "
+            "Nesses casos, ative `SOCKS5_PROXY_ENABLED=true` (consulte `base_ftp.py`) "
+            "ou execute o módulo de extração localmente."
         ),
     ),
     Fonte(
@@ -46,10 +46,10 @@ FONTES: list[Fonte] = [
         extract_modules=["scripts.extract.datasus.fetch_sinan_violencia"],
         process_modules=["scripts.process.datasus.process_sinan_violencia"],
         nota=(
-            "Violência NÃO fatal notificada em serviço de saúde, com relação "
-            "vítima-agressor -- que a Declaração de Óbito do SIM não tem. "
-            "Recorte: sexo feminino, excluindo lesão autoprovocada. Mesma "
-            "ressalva de FTP do datasus_sim."
+            "Contexto: registra violência não fatal notificada em serviços de saúde, "
+            "incluindo a relação vítima-agressor (dado ausente na Declaração de Óbito do SIM). "
+            "Recorte aplicado: sexo feminino, excluindo lesões autoprovocadas. "
+            "Atenção: aplicam-se as mesmas ressalvas de FTP da fonte `datasus_sim`."
         ),
     ),
     Fonte(
@@ -60,11 +60,11 @@ FONTES: list[Fonte] = [
         extract_modules=["scripts.extract.datajud.fetch_datajud_violencia"],
         process_modules=["scripts.process.datajud.process_datajud_violencia"],
         nota=(
-            "Metadados processuais, sem dado de vítima -- a API não expõe "
-            "partes. Mede judicialização, não perfil. Extract com checkpoint "
-            "no bucket (API lenta e instável, extração de horas); NDJSON "
-            "bruto fica em MANUAL_DIR/datajud/. Recorte via argumento: "
-            "feminicidio (45k processos no país), gravidade ou amplo."
+            "Contexto: contém apenas metadados processuais e mede a judicialização, "
+            "não o perfil das vítimas (a API não expõe as partes). "
+            "Técnico: a API é instável e o download leva horas, por isso há checkpoint no bucket. "
+            "O NDJSON bruto é salvo em env `FLOR_DE_ACO_MANUAL_DIR/datajud/`. "
+            "Recortes via argumento: `feminicidio`, `violencia_genero` ou `contexto_domestico`."
         ),
     ),
     Fonte(
@@ -77,10 +77,9 @@ FONTES: list[Fonte] = [
             "scripts.process.ibge.process_pns_violencia_domestica_2019",
         ],
         nota=(
-            "Microdados de posição fixa em MANUAL_DIR/ibge/pns/. 2013 publica duas "
-            "bases (violência por pessoa conhecida e por desconhecida, blocos "
-            "distintos no questionário); 2019 publica uma, com o agressor por "
-            "tipo de violência."
+            "Dependência manual: microdados de posição fixa devem estar em env `FLOR_DE_ACO_MANUAL_DIR/ibge/pns/`. "
+            "A edição de 2013 possui duas bases separadas (violência por pessoa conhecida e por desconhecida). "
+            "A edição de 2019 unifica os dados, detalhando o agressor por tipo de violência."
         ),
     ),
     Fonte(
@@ -90,9 +89,10 @@ FONTES: list[Fonte] = [
         automatica=False,
         process_modules=["scripts.process.datasen.process_pn_violencia_domestica"],
         nota=(
-            "Sem fetch automatizado: rodadas bienais e a página oficial é SPA "
-            "sem endpoint estático. Baixar de senado.leg.br/institucional/"
-            "datasenado/paineis_dados/#/dados-abertos para MANUAL_DIR/datasen/."
+            "Sem extração automatizada (página em SPA sem endpoint estático). "
+            "O download das rodadas bienais deve ser feito manualmente no portal de Dados Abertos "
+            "(senado.leg.br/institucional/datasenado/paineis_dados/#/dados-abertos) "
+            "e os arquivos salvos em env `FLOR_DE_ACO_MANUAL_DIR/datasen/`."
         ),
     ),
 ]
