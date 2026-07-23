@@ -4,8 +4,6 @@
 [![Kaggle](https://img.shields.io/badge/Dataset-Kaggle-e8a0b0?labelColor=7a2d45&logo=kaggle&logoColor=e8a0b0)](https://www.kaggle.com/datasets/rafatrindade/feminicidio-br)
 [![GitHub Stars](https://img.shields.io/github/stars/rafa-trindade/flor-de-aco?style=flat&labelColor=1a0d12&color=7a2d45)](https://github.com/rafa-trindade/flor-de-aco-fundation)
 
-## Sobre o Projeto
-
 **Flor de Aço** nasceu da necessidade de transformar dados dispersos sobre violência de gênero em um recurso estruturado, comparável e pronto para análise - porque entender a escala do problema é o primeiro passo para enfrentá-lo.
 
 Inicialmente idealizado por **[Gabrielle Urcioli](https://www.linkedin.com/in/gabrielle-urcioli/)** e **[Rafael Trindade](https://www.linkedin.com/in/rafatrindade/)**, o projeto reúne, padroniza e documenta microdados públicos de diferentes órgãos, oferecendo uma estrutura pronta para que pesquisadores, cientistas de dados, jornalistas e profissionais conduzam seus próprios estudos de forma organizada e reproduzível.
