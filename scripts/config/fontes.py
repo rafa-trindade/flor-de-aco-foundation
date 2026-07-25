@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 class Fonte:
     id: str
     nome: str
+    descricao: str
     pasta_bucket: str
     automatica: bool
     extract_modules: list[str] = field(default_factory=list)
@@ -19,6 +20,7 @@ FONTES: list[Fonte] = [
     Fonte(
         id="macroregiao",
         nome="Macrorregião e Região de Saúde (Ministério da Saúde)",
+        descricao="Mapeamento geográfico de macrorregiões e regiões de saúde do Ministério da Saúde.",
         pasta_bucket="macroregiao",
         automatica=True,
         extract_modules=["scripts.extract.macroregiao.fetch_macroregiao_de_saude"],
@@ -28,6 +30,7 @@ FONTES: list[Fonte] = [
     Fonte(
         id="datasus_sim",
         nome="SIM/DATASUS -- óbitos femininos por agressão (CID-10 X85-Y09)",
+        descricao="Registros de mortalidade do SIM com foco em óbitos femininos por agressão, atuando como proxy para feminicídios.",
         pasta_bucket="datasus_sim",
         automatica=True,
         extract_modules=["scripts.extract.datasus.fetch_sim_causas_externas"],
@@ -41,6 +44,7 @@ FONTES: list[Fonte] = [
     Fonte(
         id="datasus_sinan",
         nome="SINAN/DATASUS -- violência interpessoal contra mulheres (ficha VIOL)",
+        descricao="Notificações de violência interpessoal não fatal contra mulheres em serviços de saúde, detalhando a relação vítima-agressor.",
         pasta_bucket="datasus_sinan",
         automatica=True,
         extract_modules=["scripts.extract.datasus.fetch_sinan_violencia"],
@@ -55,6 +59,7 @@ FONTES: list[Fonte] = [
     Fonte(
         id="datajud",
         nome="CNJ/Datajud -- processos de violência contra a mulher",
+        descricao="Metadados processuais do CNJ para mensuração da judicialização de casos de violência contra a mulher e feminicídio.",
         pasta_bucket="datajud",
         automatica=True,
         extract_modules=["scripts.extract.datajud.fetch_datajud_violencia"],
@@ -70,6 +75,7 @@ FONTES: list[Fonte] = [
     Fonte(
         id="ibge_pns",
         nome="PNS/IBGE -- mulheres vítimas de violência (2013 e 2019)",
+        descricao="Microdados da Pesquisa Nacional de Saúde sobre mulheres vítimas de violência (edições 2013 e 2019).",
         pasta_bucket="ibge",
         automatica=False,
         process_modules=[
@@ -85,6 +91,7 @@ FONTES: list[Fonte] = [
     Fonte(
         id="datasen",
         nome="DataSenado -- Pesquisa Violência Doméstica e Familiar (PNVD)",
+        descricao="Dados da Pesquisa Nacional sobre Violência Doméstica e Familiar (PNVD), realizada bienalmente pelo DataSenado.",
         pasta_bucket="datasen",
         automatica=False,
         process_modules=["scripts.process.datasen.process_pn_violencia_domestica"],

@@ -25,6 +25,7 @@ COLUNAS = [
     "arquivo",
     "diretorio",
     "fontes_relacionadas",
+    "descricao",
     "num_registros",
     "num_colunas",
     "tamanho_bytes",
@@ -39,13 +40,21 @@ def _e_arquivo_de_controle(nome: str) -> bool:
     )
 
 
-def _fontes_por_pasta() -> dict[str, str]:
-    """Nomes das fontes agrupados por pasta do bucket (separados por ' | ' em caso de colisão de prefixo)."""
+def _fontes_por_pasta() -> dict[str, dict[str, str]]:
+    """Nomes e descrições das fontes agrupados por pasta do bucket (separados por ' | ' em colisões)."""
     nomes = defaultdict(list)
+    descricoes = defaultdict(list)
     for f in FONTES:
         nomes[f.pasta_bucket].append(f.nome)
-    return {pasta: " | ".join(v) for pasta, v in nomes.items()}
-
+        descricoes[f.pasta_bucket].append(f.descricao)
+        
+    return {
+        pasta: {
+            "nomes": " | ".join(nomes[pasta]),
+            "descricoes": " | ".join(descricoes[pasta])
+        }
+        for pasta in nomes.keys()
+    }
 
 def _montar_s3_filesystem() -> pafs.S3FileSystem:
     endpoint = env.MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
@@ -69,7 +78,7 @@ def _metadados_parquet(s3_fs: pafs.S3FileSystem, bucket: str,
         return None, None
 
 
-def gerar_linhas(s3_client, s3_fs, bucket: str, nomes: dict[str, str]) -> list[dict]:
+def gerar_linhas(s3_client, s3_fs, bucket: str, infos: dict[str, dict[str, str]]) -> list[dict]:
     paginator = s3_client.get_paginator("list_objects_v2")
     linhas = []
 
@@ -86,10 +95,13 @@ def gerar_linhas(s3_client, s3_fs, bucket: str, nomes: dict[str, str]) -> list[d
             if key.endswith(".parquet"):
                 num_registros, num_colunas = _metadados_parquet(s3_fs, bucket, key)
 
+            info_pasta = infos.get(pasta, {"nomes": "(não mapeado em fontes.py)", "descricoes": ""})
+
             linhas.append({
                 "arquivo": key,
                 "diretorio": pasta,
-                "fontes_relacionadas": nomes.get(pasta, "(não mapeado em fontes.py)"),
+                "fontes_relacionadas": info_pasta["nomes"],
+                "descricao": info_pasta["descricoes"], # <--- ADICIONADO AQUI
                 "num_registros": num_registros,
                 "num_colunas": num_colunas,
                 "tamanho_bytes": obj["Size"],
