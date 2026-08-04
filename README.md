@@ -1,6 +1,6 @@
 ![header](https://github.com/rafa-trindade/flor-de-aco/blob/main/docs/images/fem-banner.png?raw=true)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-c8607a?labelColor=1a0d12)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-c8607a?labelColor=1a0d12)](LICENSE)
 [![Kaggle](https://img.shields.io/badge/Dataset-Kaggle-e8a0b0?labelColor=7a2d45&logo=kaggle&logoColor=e8a0b0)](https://www.kaggle.com/datasets/rafatrindade/feminicidio-br)
 [![GitHub Stars](https://img.shields.io/github/stars/rafa-trindade/flor-de-aco?style=flat&labelColor=1a0d12&color=7a2d45)](https://github.com/rafa-trindade/flor-de-aco-fundation)
 
@@ -24,6 +24,16 @@ O feminicídio está contemplado, mas como desfecho de um percurso mais amplo. N
 | Óbito por agressão | SIM/DATASUS |
 
 O dataset consolidado está disponível no [Kaggle](https://www.kaggle.com/datasets/rafatrindade/feminicidio-br). O objetivo de longo prazo é consolidar os estudos produzidos em [github.com/rafa-trindade/flor-de-aco](https://github.com/rafa-trindade/flor-de-aco) em um painel público e interativo - um instrumento de monitoramento, conscientização e enfrentamento da violência contra mulheres no Brasil.
+
+---
+
+## 💼 Aplicações Corporativas, GovTech e ESG
+
+O **Flor de Aço** é uma infraestrutura de dados poderosa que vai além da pesquisa acadêmica, servindo como motor para ações estruturadas nos setores público e privado:
+
+* **Setor Público e GovTechs:** Planejamento de políticas públicas e alocação de recursos baseada em evidências, cruzando áreas com alto descumprimento de medidas protetivas (DataJud) e demanda por atendimento de saúde (SINAN).
+* **ESG e Governança Corporativa:** Grandes empresas e consultorias podem utilizar a metodologia do projeto para desenhar programas de impacto social, mapear vulnerabilidades regionais e estruturar redes de apoio para colaboradoras.
+* **Jornalismo de Dados e Think Tanks:** Sustentação de painéis interativos, observatórios de violência e relatórios de impacto social utilizando bases já tratadas e prontas para análise cruzada.
 
 ---
 
@@ -268,7 +278,12 @@ O repositório publica apenas as bases processadas. Os microdados originais - ar
 
 ## 📄 Licença e Créditos
 
-Este dataset consolidado é disponibilizado sob licença **CC0 1.0** (domínio público). Isso se refere ao trabalho de curadoria, padronização e harmonização realizado neste repositório - os dados originais permanecem de titularidade e responsabilidade das instituições abaixo, que devem ser citadas ao utilizar cada fonte individualmente:
+Este projeto opera sob um modelo duplo de licenciamento, separando a engenharia de software dos dados públicos:
+
+1. **Código-fonte e Arquitetura:** O pipeline de extração, estruturação e padronização (neste repositório) está licenciado sob a **GNU GPLv3**. O uso corporativo da infraestrutura como código exige a manutenção do código aberto ou parceria comercial direta.
+2. **Dataset Consolidado:** Os arquivos de dados publicados no Kaggle são disponibilizados sob licença **CC0 1.0 (Domínio Público)**, referente estritamente ao trabalho de curadoria e harmonização.
+
+Os dados originais permanecem de titularidade e responsabilidade das instituições abaixo, que devem ser citadas ao utilizar cada fonte individualmente:
 
 - **DataSenado (Pesquisa Violência Doméstica e Familiar):**
   > INSTITUTO DE PESQUISA DATASENADO. *Microdados da Pesquisa Violência Doméstica e Familiar*, 2005 – 2023. Brasília, DF. 2007. Disponível em: <https://www.senado.leg.br/institucional/datasenado/paineis_dados/#/?pesquisa=violencia_domestica_familiar>. 
