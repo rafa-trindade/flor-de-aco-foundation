@@ -45,7 +45,9 @@ MINIO_BUCKET = env.MINIO_BUCKET
 
 DATASET_NAME = 'feminicidio-br'
 DATASET_TITLE = 'feminicidio-br'
-FILES_TO_IGNORE = {'.gitkeep', 'raw_lake_metadados.csv'}
+FILES_TO_IGNORE = {'.gitkeep'}
+
+SEMPRE_ATUALIZAR = {"flor-de-aco-metadados.csv"}
 
 CACHE_DIR = PUBLISH_CACHE_DIR
 
@@ -101,7 +103,8 @@ def load_lake_to_kaggle():
     reaproveitados = 0
     for s3_key, tamanho_remoto in objetos_s3.items():
         destino = CACHE_DIR / s3_key
-        if destino.exists() and destino.stat().st_size == tamanho_remoto:
+        inalterado = destino.exists() and destino.stat().st_size == tamanho_remoto
+        if inalterado and destino.name not in SEMPRE_ATUALIZAR:
             reaproveitados += 1
             continue
 
@@ -112,10 +115,6 @@ def load_lake_to_kaggle():
 
     logger.info(f"✔ {baixados} arquivo(s) baixado(s), {reaproveitados} reaproveitado(s) do cache local.")
 
-    # Limpa do cache local qualquer arquivo que não existe mais no
-    # bucket (evita publicar dado obsoleto/removido na origem).
-    # Exclui os arquivos de controle nossos (não vêm do bucket, não
-    # devem nunca ser tratados como órfãos).
     ARQUIVOS_DE_CONTROLE = {"dataset-metadata.json", ".ultima_publicacao_sucesso"}
     chaves_esperadas = set(objetos_s3.keys())
     removidos = 0
@@ -146,11 +145,7 @@ def load_lake_to_kaggle():
 
     metadata_path = CACHE_DIR / "dataset-metadata.json"
 
-    # Checa se o dataset já existe ANTES de decidir o metadata --
-    # se existir, tenta preservar tags/subtítulo/descrição já
-    # configurados manualmente no Kaggle, em vez de sobrescrever
-    # com um metadata mínimo do zero (bug identificado: isso
-    # apagava configurações manuais a cada publicação).
+
     try:
         api.dataset_list_files(dataset_id)
         dataset_exists = True
