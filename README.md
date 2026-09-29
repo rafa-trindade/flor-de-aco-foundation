@@ -2,7 +2,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-c8607a?labelColor=1a0d12)](LICENSE)
 [![Kaggle](https://img.shields.io/badge/Dataset-Kaggle-e8a0b0?labelColor=7a2d45&logo=kaggle&logoColor=e8a0b0)](https://www.kaggle.com/datasets/rafatrindade/feminicidio-br)
-[![GitHub Stars](https://img.shields.io/github/stars/rafa-trindade/flor-de-aco?style=flat&labelColor=1a0d12&color=7a2d45)](https://github.com/rafa-trindade/flor-de-aco-fundation)
+[![GitHub Stars](https://img.shields.io/github/stars/rafa-trindade/flor-de-aco?style=flat&labelColor=1a0d12&color=7a2d45)](https://github.com/rafa-trindade/flor-de-aco-foundation)
 
 **Flor de Aço** nasceu da necessidade de transformar dados dispersos sobre violência de gênero em um recurso estruturado, comparável e pronto para análise - porque entender a escala do problema é o primeiro passo para enfrentá-lo.
 
