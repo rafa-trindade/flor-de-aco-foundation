@@ -13,13 +13,13 @@ import pyarrow.parquet as pq
 
 from scripts.common import env, exit_codes
 from scripts.common.bucket_sync import get_s3_client
-from scripts.common.paths import DATA_DIR
+from scripts.common.paths import BASE_DIR
 from scripts.config.fontes import FONTES
 
 logger = logging.getLogger(__name__)
 
 NOME_ARQUIVO_SAIDA = "flor-de-aco-metadados.csv"
-CAMINHO_LOCAL = DATA_DIR / NOME_ARQUIVO_SAIDA
+CAMINHO_LOCAL = BASE_DIR / "docs" / NOME_ARQUIVO_SAIDA
 
 COLUNAS = [
     "arquivo",
